@@ -130,6 +130,9 @@ serve(async (req) => {
       subDetails,
       subCount: subList.length,
       userInfoV2: userInfoV2?.data ?? userInfoV2,
+      _rawSubAccountsV2: subAccountsV2,
+      _rawMasterAccounts: masterAccounts,
+      _rawFutMaster: futMaster,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
