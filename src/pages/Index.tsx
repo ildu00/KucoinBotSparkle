@@ -37,7 +37,7 @@ export default function Dashboard() {
   const [accounts, setAccounts] = useState<ApiAccount[]>(loadAccounts);
   const [accountsData, setAccountsData] = useState<AccountData[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showSettings, setShowSettings] = useState(accountsData.length === 0);
+  const [showSettings, setShowSettings] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   const saveAccounts = (accs: ApiAccount[]) => {
@@ -60,7 +60,7 @@ export default function Dashboard() {
       if (errors.length > 0) {
         errors.forEach((e) => toast.error(`${e.label}: ${e.error}`));
       } else {
-        toast.success("Data refreshed successfully");
+        toast.success("Data refreshed");
       }
       setShowSettings(false);
     } finally {
@@ -68,7 +68,6 @@ export default function Dashboard() {
     }
   }, [accounts]);
 
-  // Aggregate totals
   const totalBalance = accountsData.reduce((s, a) => s + a.totalBalance, 0);
   const totalBotBalance = accountsData.reduce((s, a) => s + a.botBalance, 0);
   const totalFuturesBalance = accountsData.reduce((s, a) => s + (a.futuresBalance ?? 0), 0);
@@ -85,8 +84,9 @@ export default function Dashboard() {
       ].filter((d) => d.value > 0);
 
   const historyData = totalBalance > 0 ? generateSimulatedHistory(totalBalance) : [];
-
   const totalProfitPct = totalBalance > 0 ? (totalProfit / (totalBalance - totalProfit)) * 100 : 0;
+
+  const missingSubPermission = accountsData.filter((a) => a.diagnosis === "MISSING_SUB_PERMISSION");
 
   return (
     <div className="min-h-screen bg-background grid-bg">
@@ -97,33 +97,22 @@ export default function Dashboard() {
             <div className="w-7 h-7 rounded-lg bg-primary/20 border border-primary/40 flex items-center justify-center">
               <Bot className="w-4 h-4 text-primary" />
             </div>
-            <div>
-              <span className="font-bold text-sm tracking-wide">KuCoin</span>
-              <span className="text-primary font-bold text-sm"> Bot Dashboard</span>
-            </div>
+            <span className="font-bold text-sm tracking-wide">KuCoin</span>
+            <span className="text-primary font-bold text-sm">Bot Dashboard</span>
           </div>
-
           <div className="flex items-center gap-3">
             {lastUpdate && (
               <span className="text-xs text-muted-foreground hidden sm:block">
                 Updated {lastUpdate.toLocaleTimeString()}
               </span>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowSettings(!showSettings)}
-              className="gap-2 border-border hover:border-primary/50"
-            >
+            <Button size="sm" variant="outline" onClick={() => setShowSettings(!showSettings)}
+              className="gap-2 border-border hover:border-primary/50">
               {showSettings ? <X className="w-3.5 h-3.5" /> : <Settings className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">{showSettings ? "Close" : "API Keys"}</span>
             </Button>
-            <Button
-              size="sm"
-              onClick={fetchAll}
-              disabled={loading}
-              className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 glow-primary"
-            >
+            <Button size="sm" onClick={fetchAll} disabled={loading}
+              className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 glow-primary">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">{loading ? "Loading..." : "Refresh"}</span>
             </Button>
@@ -132,23 +121,21 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* Settings Panel */}
+        {/* Settings */}
         {showSettings && (
-          <div className="animate-fade-in">
-            <div className="card-trading p-6 space-y-5">
-              <div className="flex items-center gap-3">
-                <div className="w-1 h-5 rounded-full bg-primary" />
-                <h2 className="font-semibold text-sm uppercase tracking-widest text-muted-foreground">API Configuration</h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Keys are stored locally in your browser. Enable: General, Spot, Futures permissions. Keys never leave your device — all signing happens server-side via encrypted edge function.
-              </p>
-              <ApiKeysForm accounts={accounts} onChange={saveAccounts} />
-              <Button onClick={fetchAll} disabled={loading} className="w-full gap-2 bg-primary text-primary-foreground glow-primary">
-                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-                {loading ? "Fetching data..." : "Load Dashboard"}
-              </Button>
+          <div className="animate-fade-in card-trading p-6 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-1 h-5 rounded-full bg-primary" />
+              <h2 className="font-semibold text-sm uppercase tracking-widest text-muted-foreground">API Configuration</h2>
             </div>
+            <p className="text-sm text-muted-foreground">
+              Keys stored locally in your browser. Required permissions: <span className="font-mono text-xs text-primary">General + Spot + Futures + <strong>Sub-Account Management</strong></span>
+            </p>
+            <ApiKeysForm accounts={accounts} onChange={saveAccounts} />
+            <Button onClick={fetchAll} disabled={loading} className="w-full gap-2 bg-primary text-primary-foreground glow-primary">
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              {loading ? "Fetching data..." : "Load Dashboard"}
+            </Button>
           </div>
         )}
 
@@ -159,10 +146,9 @@ export default function Dashboard() {
               <Bot className="w-8 h-8 text-primary opacity-60" />
             </div>
             <h2 className="font-semibold text-lg mb-2">No data yet</h2>
-            <p className="text-muted-foreground text-sm mb-6 max-w-sm">Configure your KuCoin API keys to see your bot balances and statistics.</p>
+            <p className="text-muted-foreground text-sm mb-6 max-w-sm">Configure your KuCoin API keys to see your bot balances.</p>
             <Button onClick={() => setShowSettings(true)} variant="outline" className="border-primary/40 text-primary hover:bg-primary/10">
-              <Settings className="w-4 h-4 mr-2" />
-              Configure API Keys
+              <Settings className="w-4 h-4 mr-2" />Configure API Keys
             </Button>
           </div>
         )}
@@ -170,53 +156,38 @@ export default function Dashboard() {
         {/* Dashboard */}
         {accountsData.length > 0 && (
           <div className="space-y-6 animate-fade-in">
-            {/* Error / Diagnosis banners */}
+
+            {/* Error banners */}
             {accountsData.filter((a) => a.error).map((a) => (
               <div key={a.label} className="flex items-center gap-3 p-4 rounded-lg bg-loss/10 border border-loss/30 text-sm">
                 <AlertCircle className="w-4 h-4 text-loss flex-shrink-0" />
                 <span><strong>{a.label}:</strong> {a.error}</span>
               </div>
             ))}
-            {accountsData.filter((a) => a.diagnosis === "MISSING_SUB_PERMISSION").map((a) => (
+
+            {/* Sub-account permission warning */}
+            {missingSubPermission.map((a) => (
               <div key={a.label + "_perm"} className="p-5 rounded-lg bg-warning/10 border border-warning/40 space-y-3">
                 <div className="flex items-center gap-2 font-semibold text-warning text-sm">
                   <AlertCircle className="w-4 h-4" />
-                  Action Required — Missing "Sub-Account" Permission ({a.label})
+                  Action Required — API key missing "Sub-Account Management" permission
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Found <strong className="text-foreground">{a.subCount} trading bot sub-accounts</strong> (robot…), but balances are hidden. Your API key is missing <strong className="text-foreground">Sub-Account Management</strong> permission.
+                  Found <strong className="text-foreground">{a.subCount} bot sub-accounts</strong> (robot…) but cannot read their balances. Add <strong className="text-foreground">Sub-Account Management</strong> to your API key permissions.
                 </p>
-                <div className="bg-secondary rounded-lg p-4 space-y-2 text-sm">
-                  <p className="font-semibold text-xs uppercase tracking-widest text-muted-foreground mb-2">Fix — 3 steps:</p>
+                <div className="bg-secondary rounded-lg p-4 text-sm">
+                  <p className="font-semibold text-xs uppercase tracking-widest text-muted-foreground mb-2">How to fix:</p>
                   <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground leading-relaxed">
-                    <li>Open <strong className="text-foreground">KuCoin → Account → API Management</strong></li>
-                    <li>Create a new API key and check these permissions:
+                    <li>Go to <strong className="text-foreground">KuCoin → Account → API Management</strong></li>
+                    <li>
+                      Create a new key, enable all 4 permissions:
                       <div className="mt-1.5 ml-5 flex flex-wrap gap-1.5">
                         {["General", "Spot Trading", "Futures Trading", "Sub-Account Management"].map(p => (
                           <span key={p} className="px-2 py-0.5 rounded text-xs font-mono bg-primary/20 text-primary border border-primary/30">{p}</span>
                         ))}
                       </div>
                     </li>
-                    <li>Enter the new key above and click <strong className="text-foreground">Refresh</strong></li>
-                  </ol>
-                </div>
-              </div>
-            ))}
-              <div key={a.label + "diag"} className="p-5 rounded-lg bg-warning/10 border border-warning/30 text-sm space-y-3">
-                <div className="flex items-center gap-2 font-semibold text-warning">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  API Key Issue Detected — {a.label}
-                </div>
-                <p className="text-muted-foreground leading-relaxed">
-                  Your API key appears to be created on a <strong className="text-foreground">sub-account</strong>, not the master account. The ~3708 USDT balance is on the master account.
-                </p>
-                <div className="space-y-1.5 text-muted-foreground">
-                  <p className="font-medium text-foreground text-xs uppercase tracking-widest">How to fix:</p>
-                  <ol className="list-decimal list-inside space-y-1 text-xs leading-relaxed">
-                    <li>Go to <strong className="text-foreground">KuCoin.com → Account → API Management</strong></li>
-                    <li>Make sure you are on the <strong className="text-foreground">Master Account</strong> (not a sub-account page)</li>
-                    <li>Create a new API key with permissions: <strong className="text-foreground">General + Spot Trading + Futures Trading + Sub-Account</strong></li>
-                    <li>Enter the new key here and click Refresh</li>
+                    <li>Enter the new key above → click <strong className="text-foreground">Refresh</strong></li>
                   </ol>
                 </div>
               </div>
@@ -224,33 +195,22 @@ export default function Dashboard() {
 
             {/* Overview Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard
-                title="Total Balance"
+              <StatCard title="Total Balance"
                 value={`$${totalBalance.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                icon={<DollarSign className="w-4 h-4" />}
-                highlight
-              />
-              <StatCard
-                title="Futures / Bots"
+                icon={<DollarSign className="w-4 h-4" />} highlight />
+              <StatCard title="Futures / Bots"
                 value={`$${totalFuturesBalance.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 subtitle={allBots.length > 0 ? `${allBots.length} bots` : "Futures equity"}
-                icon={<Bot className="w-4 h-4" />}
-              />
-              <StatCard
-                title="Total Profit"
+                icon={<Bot className="w-4 h-4" />} />
+              <StatCard title="Total Profit"
                 value={`${totalProfit >= 0 ? "+" : ""}$${totalProfit.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                change={totalProfitPct}
-                icon={<TrendingUp className="w-4 h-4" />}
-              />
-              <StatCard
-                title="Free Balance"
+                change={totalProfitPct} icon={<TrendingUp className="w-4 h-4" />} />
+              <StatCard title="Free Balance"
                 value={`$${totalSpotBalance.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                subtitle="Spot + Main"
-                icon={<Wallet className="w-4 h-4" />}
-              />
+                subtitle="Spot + Main" icon={<Wallet className="w-4 h-4" />} />
             </div>
 
-            {/* Charts Row */}
+            {/* Charts */}
             <div className="grid md:grid-cols-2 gap-4">
               <div className="card-trading p-6 space-y-4">
                 <div className="flex items-center gap-2">
@@ -259,21 +219,18 @@ export default function Dashboard() {
                 </div>
                 <PerformanceChart data={historyData} />
               </div>
-
               <div className="card-trading p-6 space-y-4">
                 <div className="flex items-center gap-2">
                   <div className="w-1 h-4 rounded-full bg-chart-2" />
                   <h3 className="font-semibold text-sm">Allocation</h3>
                 </div>
-                {allocationData.length > 0 ? (
-                  <AllocationChart data={allocationData} />
-                ) : (
-                  <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">No data</div>
-                )}
+                {allocationData.length > 0
+                  ? <AllocationChart data={allocationData} />
+                  : <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">No data</div>}
               </div>
             </div>
 
-            {/* Per-account tabs if multiple */}
+            {/* Bots table */}
             {accountsData.length > 1 ? (
               <div className="card-trading p-6 space-y-4">
                 <div className="flex items-center gap-2">
@@ -284,18 +241,12 @@ export default function Dashboard() {
                   <TabsList className="bg-secondary border border-border">
                     <TabsTrigger value="all">All ({allBots.length})</TabsTrigger>
                     {accountsData.map((a) => (
-                      <TabsTrigger key={a.label} value={a.label}>
-                        {a.label} ({a.bots.length})
-                      </TabsTrigger>
+                      <TabsTrigger key={a.label} value={a.label}>{a.label} ({a.bots.length})</TabsTrigger>
                     ))}
                   </TabsList>
-                  <TabsContent value="all" className="mt-4">
-                    <BotsTable bots={allBots} />
-                  </TabsContent>
+                  <TabsContent value="all" className="mt-4"><BotsTable bots={allBots} /></TabsContent>
                   {accountsData.map((a) => (
-                    <TabsContent key={a.label} value={a.label} className="mt-4">
-                      <BotsTable bots={a.bots} />
-                    </TabsContent>
+                    <TabsContent key={a.label} value={a.label} className="mt-4"><BotsTable bots={a.bots} /></TabsContent>
                   ))}
                 </Tabs>
               </div>
@@ -304,8 +255,8 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-1 h-4 rounded-full bg-chart-3" />
-                    <h3 className="font-semibold text-sm">Active Bots</h3>
-                    <span className="text-xs text-muted-foreground font-mono ml-1">({activeBots.length} running)</span>
+                    <h3 className="font-semibold text-sm">Bots</h3>
+                    <span className="text-xs text-muted-foreground font-mono ml-1">({activeBots.length} active)</span>
                   </div>
                   <span className="text-xs text-muted-foreground">{allBots.length} total</span>
                 </div>
@@ -313,12 +264,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Debug panels */}
-            {accountsData.map((acc) => acc.rawDebug && (
-              <DebugPanel key={acc.label} data={{ account: acc.label, raw: acc.rawDebug }} />
-            ))}
-
-            {/* Per-account cards */}
+            {/* Per-account summary cards (multi-account) */}
             {accountsData.length > 1 && (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {accountsData.map((acc) => (
@@ -336,30 +282,26 @@ export default function Dashboard() {
                       <p className="text-xs text-loss">{acc.error}</p>
                     ) : (
                       <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Bots</p>
-                          <p className="font-mono font-medium">${acc.botBalance.toFixed(2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Free</p>
-                          <p className="font-mono font-medium">${acc.spotBalance.toFixed(2)}</p>
-                        </div>
+                        <div><p className="text-xs text-muted-foreground">Bots</p><p className="font-mono font-medium">${acc.botBalance.toFixed(2)}</p></div>
+                        <div><p className="text-xs text-muted-foreground">Free</p><p className="font-mono font-medium">${acc.spotBalance.toFixed(2)}</p></div>
                         <div>
                           <p className="text-xs text-muted-foreground">Profit</p>
                           <p className={`font-mono font-medium ${acc.profit >= 0 ? "text-profit" : "text-loss"}`}>
                             {acc.profit >= 0 ? "+" : ""}${acc.profit.toFixed(2)}
                           </p>
                         </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Active bots</p>
-                          <p className="font-mono font-medium">{acc.bots.filter((b) => b.status === "active").length}</p>
-                        </div>
+                        <div><p className="text-xs text-muted-foreground">Active</p><p className="font-mono font-medium">{acc.bots.filter((b) => b.status === "active").length}</p></div>
                       </div>
                     )}
                   </div>
                 ))}
               </div>
             )}
+
+            {/* Debug panel */}
+            {accountsData.map((acc) => acc.rawDebug && (
+              <DebugPanel key={acc.label} data={{ account: acc.label, raw: acc.rawDebug }} />
+            ))}
           </div>
         )}
       </main>
