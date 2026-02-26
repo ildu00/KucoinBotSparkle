@@ -1,1 +1,4 @@
 project_id = "sgrnzcacimpijwirepiz"
+
+[functions.kucoin-proxy]
+verify_jwt = false
