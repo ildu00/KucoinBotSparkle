@@ -25,7 +25,6 @@ async function apiCall(
   const strToSign = timestamp + method + endpoint + body;
   const signature = await hmacSha256Base64(apiSecret, strToSign);
   const passphraseSign = await hmacSha256Base64(apiSecret, apiPassphrase);
-
   try {
     const res = await fetch(`${baseUrl}${endpoint}`, {
       method,
@@ -65,60 +64,58 @@ serve(async (req) => {
     const f = (ep: string) => apiCall(apiKey, apiSecret, apiPassphrase, FUT,  ep);
 
     const [
-      // Standard accounts
-      acctTrade, acctMain, acctMargin, acctTradeHF,
-      // UA API — Unified Account (might include bot funds)
-      uaAll, uaSpot, uaFutures, uaMargin,
-      // Futures overview (separate host)
-      futUSDT, futXBT,
-      // Futures positions (bots open positions)
-      futPositions,
-      // Try all realistic bot/strategy endpoints
-      botList1, botList2, botList3, botList4, botList5,
-      botList6, botList7, botList8, botList9, botList10,
+      // ALL accounts without type filter → shows bot/earn types too
+      allAccounts,
+      // Sub-accounts
+      subAccounts,
+      // Bot type accounts
+      acctBot,
+      acctTradeBot,
+      // KuCoin earn / flexible savings
+      earnList,
+      // Total assets overview
+      assetOverview,
+      // Futures sub-accounts
+      futSubAccounts,
+      // Bot strategy list - new paths
+      botSpot1, botSpot2, botSpot3,
+      botFut1, botFut2, botFut3,
+      // Futures bot positions
+      futBotOrders,
     ] = await Promise.all([
-      // Standard
-      s("/api/v1/accounts?type=trade"),
-      s("/api/v1/accounts?type=main"),
-      s("/api/v1/accounts?type=margin"),
-      s("/api/v1/accounts?type=trade_hf"),
-      // UA API
-      s("/api/ua/v1/account/balance"),
-      s("/api/ua/v1/account/balance?accountType=SPOT"),
-      s("/api/ua/v1/account/balance?accountType=FUTURES"),
-      s("/api/ua/v1/account/balance?accountType=MARGIN"),
-      // Futures host
-      f("/api/v1/account-overview?currency=USDT"),
-      f("/api/v1/account-overview?currency=XBT"),
-      f("/api/v1/positions"),
-      // Grid / Bot endpoints — wide search
-      s("/api/v1/grid/strategy?pageSize=50"),
-      s("/api/v1/grid/strategies?pageSize=50"),
-      s("/api/v1/strategy?pageSize=50"),
-      s("/api/v1/strategies?pageSize=50"),
-      s("/api/v1/spot/grid?pageSize=50"),
-      f("/api/v1/grid/strategy?pageSize=50"),
-      f("/api/v1/grid/strategies?pageSize=50"),
-      s("/api/v1/hf/strategy?pageSize=50"),
-      s("/api/ua/v1/strategy?pageSize=50"),
-      s("/api/ua/v1/grid?pageSize=50"),
+      s("/api/v1/accounts"),                                                // ALL types
+      s("/api/v1/sub-accounts"),                                            // sub-accounts list
+      s("/api/v1/accounts?type=bot"),                                       // bot type
+      s("/api/v1/accounts?type=trade_bot"),                                 // trade_bot type
+      s("/api/v1/earn/hold-assets"),                                        // earn holdings
+      s("/api/v1/asset/detail"),                                            // asset overview
+      f("/api/v1/trade-statistics"),                                        // futures stats
+      // Bot strategy endpoints (different patterns)
+      s("/api/v1/bot/strategy/spot/list?pageSize=50&currentPage=1"),
+      s("/api/v1/bot/strategy/futures/list?pageSize=50&currentPage=1"),
+      s("/api/v1/bot/list?pageSize=50&currentPage=1"),
+      f("/api/v1/bot/strategy/futures/list?pageSize=50&currentPage=1"),
+      f("/api/v1/bot/list?pageSize=50&currentPage=1"),
+      f("/api/v1/strategy/list?pageSize=50&currentPage=1"),
+      f("/api/v1/order/strategy?pageSize=50&currentPage=1"),
     ]);
 
     return new Response(JSON.stringify({
-      acctTrade, acctMain, acctMargin, acctTradeHF,
-      uaAll, uaSpot, uaFutures, uaMargin,
-      futUSDT, futXBT, futPositions,
+      allAccounts,
+      subAccounts,
+      acctBot,
+      acctTradeBot,
+      earnList,
+      assetOverview,
+      futSubAccounts,
       botEndpoints: {
-        "SPOT /api/v1/grid/strategy": botList1,
-        "SPOT /api/v1/grid/strategies": botList2,
-        "SPOT /api/v1/strategy": botList3,
-        "SPOT /api/v1/strategies": botList4,
-        "SPOT /api/v1/spot/grid": botList5,
-        "FUT /api/v1/grid/strategy": botList6,
-        "FUT /api/v1/grid/strategies": botList7,
-        "SPOT /api/v1/hf/strategy": botList8,
-        "SPOT /api/ua/v1/strategy": botList9,
-        "SPOT /api/ua/v1/grid": botList10,
+        "SPOT /bot/strategy/spot/list": botSpot1,
+        "SPOT /bot/strategy/futures/list": botSpot2,
+        "SPOT /bot/list": botSpot3,
+        "FUT /bot/strategy/futures/list": botFut1,
+        "FUT /bot/list": botFut2,
+        "FUT /strategy/list": botFut3,
+        "FUT /order/strategy": futBotOrders,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
