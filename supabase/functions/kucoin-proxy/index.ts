@@ -42,91 +42,95 @@ serve(async (req) => {
 
   try {
     const { apiKey: ak, apiSecret: as_, apiPassphrase: ap } = await req.json();
-    if (!ak || !as_ || !ap) return new Response(JSON.stringify({ error: "Missing creds" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!ak || !as_ || !ap) return new Response(
+      JSON.stringify({ error: "Missing credentials" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
 
     const s = (ep: string) => apiCall(ak, as_, ap, SPOT, ep);
     const f = (ep: string) => apiCall(ak, as_, ap, FUT,  ep);
 
-    // Get ALL currencies in ALL account types
-    const [
-      allAccountsAllCurrencies,  // no filter = every currency and every type
-      userInfo,
-      // UA API - more complete
-      uaSpot, uaFutures,
-      // Futures all currencies
-      futUSDT, futXBT,
-      futAllPositions,
-      // Earn
-      earnHold, earnFixed,
-      // Sub-accounts
-      subAccounts,
-      // Try to get sub-account balance by NAME (v2 endpoint)
-      subV2,
-    ] = await Promise.all([
-      s("/api/v1/accounts"),           // ALL currencies, ALL types
-      s("/api/v1/user-info"),
-      s("/api/ua/v1/account/balance?accountType=SPOT"),
-      s("/api/ua/v1/account/balance?accountType=FUTURES"),
-      f("/api/v1/account-overview?currency=USDT"),
-      f("/api/v1/account-overview?currency=XBT"),
-      f("/api/v1/positions"),
-      s("/api/v1/earn/hold-assets?currentPage=1&pageSize=50"),
-      s("/api/v1/earn/saving/redemptionable?currentPage=1&pageSize=50"),
+    // Step 1: get sub-accounts list (need Sub-Account permission for non-null IDs)
+    const [subAccounts, userInfoV2, masterAccounts] = await Promise.all([
       s("/api/v1/sub-accounts"),
-      s("/api/v2/sub-accounts?currentPage=1&pageSize=50"),
+      s("/api/v2/user-info"),
+      s("/api/v1/accounts"),
     ]);
 
-    // Find any non-zero balance anywhere
-    const nonZeroAccounts = (allAccountsAllCurrencies?.data ?? []).filter(
-      (a: { balance: string }) => parseFloat(a.balance ?? "0") > 0
-    );
+    const subList: Array<{ subUserId: string | null; subName: string }> = subAccounts?.data ?? [];
+    const hasSubPermission = subList.some((s) => s.subUserId !== null);
 
-    // Check if sub-accounts have any non-zero via v2
-    const subV2List = subV2?.data?.items ?? subV2?.data ?? [];
+    // Step 2: if we have sub-account IDs, query each one's balance
+    let subDetails: Array<{
+      name: string;
+      id: string;
+      spotUSDT: number;
+      futuresUSDT: number;
+      total: number;
+    }> = [];
 
-    // Try to query sub-accounts that have non-null subUserId
-    const subAccountsWithId = (subAccounts?.data ?? []).filter(
-      (s: { subUserId: string | null }) => s.subUserId !== null
-    );
+    if (hasSubPermission) {
+      const robotSubs = subList.filter((s) => s.subName?.startsWith("robot") && s.subUserId);
+      subDetails = await Promise.all(
+        robotSubs.map(async (sub) => {
+          const [spotDetail, futBal] = await Promise.all([
+            s(`/api/v1/sub-accounts/${sub.subUserId}`),
+            f(`/api/v1/account-overview?currency=USDT&subName=${sub.subName}`),
+          ]);
+          let spotUSDT = 0;
+          for (const type of ["mainAccounts", "tradeAccounts", "tradeHFAccounts"]) {
+            for (const acc of spotDetail?.data?.[type] ?? []) {
+              if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
+            }
+          }
+          const futuresUSDT = parseFloat(futBal?.data?.accountEquity ?? "0");
+          return {
+            name: sub.subName,
+            id: sub.subUserId!,
+            spotUSDT,
+            futuresUSDT,
+            total: spotUSDT + futuresUSDT,
+          };
+        })
+      );
+    }
 
-    // For sub-accounts with IDs, get their balances
-    const subBalancesById = await Promise.all(
-      subAccountsWithId.slice(0, 5).map(async (sub: { subUserId: string; subName: string }) => {
-        const [spotBal] = await Promise.all([
-          s(`/api/v1/sub-accounts/${sub.subUserId}`),
-        ]);
-        return { name: sub.subName, id: sub.subUserId, spotBal };
-      })
-    );
+    // Master account balances
+    let masterUSDT = 0;
+    for (const acc of masterAccounts?.data ?? []) {
+      if (acc.currency === "USDT") masterUSDT += parseFloat(acc.balance ?? "0");
+    }
+    const futMaster = await f("/api/v1/account-overview?currency=USDT");
+    masterUSDT += parseFloat(futMaster?.data?.accountEquity ?? "0");
+
+    const subTotal = subDetails.reduce((s, r) => s + r.total, 0);
+    const grandTotal = masterUSDT + subTotal;
+
+    // Determine diagnosis
+    let diagnosis: "OK" | "MISSING_SUB_PERMISSION" | "ZERO_ALL" = "OK";
+    if (!hasSubPermission && subList.length > 0) {
+      diagnosis = "MISSING_SUB_PERMISSION";
+    } else if (grandTotal === 0) {
+      diagnosis = "ZERO_ALL";
+    }
 
     return new Response(JSON.stringify({
-      // Key findings
-      nonZeroAccountsFound: nonZeroAccounts.length,
-      nonZeroAccounts,
-      // All accounts raw
-      allAccountsAllCurrencies: allAccountsAllCurrencies?.data ?? [],
-      // User identity
-      userInfo: userInfo?.data ?? userInfo,
-      // UA
-      uaSpot: uaSpot?.data,
-      uaFutures: uaFutures?.data,
-      // Futures
-      futUSDT: futUSDT?.data,
-      futPositionsCount: (futAllPositions?.data ?? []).length,
-      futPositions: futAllPositions?.data,
-      // Earn
-      earnItems: earnHold?.data?.items ?? [],
-      earnFixed: earnFixed?.data?.items ?? [],
-      // Sub-accounts
-      subAccountsTotal: subAccounts?.data?.length ?? 0,
-      subV2Sample: subV2List.slice(0, 3),
-      subBalancesById,
+      diagnosis,
+      hasSubPermission,
+      grandTotal,
+      masterUSDT,
+      subTotal,
+      subDetails,
+      subCount: subList.length,
+      userInfoV2: userInfoV2?.data ?? userInfoV2,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (e: unknown) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 });

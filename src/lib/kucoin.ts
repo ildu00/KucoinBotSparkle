@@ -11,17 +11,19 @@ export interface AccountData {
   profit: number;
   profitPct: number;
   bots: BotData[];
-  diagnosis?: string;
+  diagnosis?: "OK" | "MISSING_SUB_PERMISSION" | "ZERO_ALL";
+  hasSubPermission?: boolean;
+  subCount?: number;
   error?: string;
   rawDebug?: unknown;
 }
 
 export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
-  const empty = (diagnosis?: string, error?: string): AccountData => ({
+  const empty = (diag?: AccountData["diagnosis"], error?: string): AccountData => ({
     label: account.label,
     totalBalance: 0, spotBalance: 0, futuresBalance: 0,
     botBalance: 0, profit: 0, profitPct: 0, bots: [],
-    diagnosis, error,
+    diagnosis: diag, error,
   });
 
   try {
@@ -31,21 +33,38 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     if (error) throw new Error(error.message);
     if (data?.error) throw new Error(data.error);
 
-    console.log("[KuCoin]", JSON.stringify(data, null, 2));
+    const grandTotal = parseFloat(String(data.grandTotal ?? 0));
+    const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
+    const subTotal = parseFloat(String(data.subTotal ?? 0));
 
-    const total = parseFloat(String(data.totalBalance ?? 0));
-    const fut = parseFloat(String(data.futuresUSDT?.accountEquity ?? 0));
+    // Build bot list from sub-account details
+    const bots: BotData[] = (data.subDetails ?? []).map((sub: {
+      name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number;
+    }) => ({
+      id: sub.id || sub.name,
+      symbol: sub.name,
+      type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+      status: "active" as const,
+      invested: sub.total,
+      currentValue: sub.total,
+      profit: 0,
+      profitPct: 0,
+      runningDays: 0,
+      label: account.label,
+    }));
 
     return {
       label: account.label,
-      totalBalance: total,
-      spotBalance: total - fut,
-      futuresBalance: fut,
-      botBalance: fut,
+      totalBalance: grandTotal,
+      spotBalance: masterUSDT,
+      futuresBalance: subTotal,
+      botBalance: subTotal,
       profit: 0,
       profitPct: 0,
-      bots: [],
+      bots,
       diagnosis: data.diagnosis,
+      hasSubPermission: data.hasSubPermission,
+      subCount: data.subCount ?? 0,
       rawDebug: data,
     };
   } catch (err) {
