@@ -115,14 +115,11 @@ serve(async (req) => {
         "FUT /bot/strategy/futures/list": botFut1,
         "FUT /bot/list": botFut2,
         "FUT /strategy/list": botFut3,
-        "FUT /order/strategy": botBotOrders,
+        "FUT /order/strategy": futBotOrders,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-
-    // silence TS unused var
-    void futBotOrders;
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: msg }), {
