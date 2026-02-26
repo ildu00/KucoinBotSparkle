@@ -109,6 +109,14 @@ serve(async (req) => {
       })
     );
 
+    // Bot orders (KuCoin built-in bots)
+    const [spotBots, futuresBots, spotBotsV2, futuresBotsV2] = await Promise.all([
+      s("/api/v1/spot-bot/orders?status=active"),
+      f("/api/v1/futures-bot/orders?status=active"),
+      s("/api/v2/bot/spot/orders?status=active"),
+      s("/api/v2/bot/futures/orders?status=active"),
+    ]);
+
     // Master account balances
     let masterUSDT = 0;
     for (const acc of masterAccounts?.data ?? []) {
@@ -137,6 +145,7 @@ serve(async (req) => {
       subDetails,
       subCount: subList.length,
       userInfoV2: userInfoV2?.data ?? userInfoV2,
+      _botDebug: { spotBots, futuresBots, spotBotsV2, futuresBotsV2 },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
