@@ -13,29 +13,68 @@ export interface AccountData {
   profitPct: number;
   bots: BotData[];
   error?: string;
+  rawDebug?: unknown;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseBots(raw: any, type: string, label: string): BotData[] {
-  const items = raw?.data?.items || raw?.data?.list || [];
-  return items.map((bot: Record<string, unknown>) => {
-    const invested = parseFloat(String(bot.investment || bot.totalInvested || bot.investedAmount || 0));
-    const currentValue = parseFloat(String(bot.totalValue || bot.currentValue || bot.totalAssets || invested));
-    const profit = parseFloat(String(bot.profit || bot.totalProfit || bot.pnl || 0));
+  if (!raw) return [];
+
+  // KuCoin returns: { code: "200000", data: { items: [...] } } or { data: [...] }
+  const items: Record<string, unknown>[] =
+    raw?.data?.items ||
+    raw?.data?.list ||
+    raw?.data ||
+    (Array.isArray(raw) ? raw : []);
+
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  return items.map((bot) => {
+    // KuCoin Spot Grid fields
+    // invested / gridAmount / investment / totalInvestment / gridInvestment
+    const invested =
+      parseFloat(String(
+        bot.investment ?? bot.totalInvestment ?? bot.gridInvestment ??
+        bot.investedAmount ?? bot.gridAmount ?? bot.runningAmt ?? 0
+      ));
+
+    // current total value = invested + profit
+    const profit =
+      parseFloat(String(
+        bot.profit ?? bot.totalProfit ?? bot.pnl ?? bot.gridProfit ??
+        bot.totalPnl ?? bot.floatProfit ?? 0
+      ));
+
+    const currentValue =
+      parseFloat(String(
+        bot.totalValue ?? bot.currentValue ?? bot.totalAssets ??
+        bot.curValue ?? 0
+      )) || (invested + profit);
+
     const profitPct = invested > 0 ? (profit / invested) * 100 : 0;
-    const startTime = bot.startTime ? Number(bot.startTime) : Date.now();
-    const runningDays = Math.floor((Date.now() - startTime) / (1000 * 60 * 60 * 24));
+
+    // startTime can be ms or seconds
+    let startTime = bot.startTime ? Number(bot.startTime) : 0;
+    if (startTime > 0 && startTime < 1e12) startTime *= 1000; // convert seconds → ms
+    const runningDays = startTime > 0
+      ? Math.max(0, Math.floor((Date.now() - startTime) / (1000 * 60 * 60 * 24)))
+      : 0;
+
+    const rawStatus = String(bot.status ?? bot.state ?? "active").toLowerCase();
+    const status: BotData["status"] =
+      rawStatus === "active" || rawStatus === "running" ? "active" :
+      rawStatus === "completed" || rawStatus === "finish" ? "completed" : "stopped";
 
     return {
-      id: String(bot.id || bot.orderId || Math.random()),
-      symbol: String(bot.symbol || bot.tradePair || ""),
+      id: String(bot.id ?? bot.orderId ?? bot.botId ?? Math.random()),
+      symbol: String(bot.symbol ?? bot.tradePair ?? bot.pair ?? ""),
       type,
-      status: String(bot.status || "active").toLowerCase() === "active" ? "active" : "stopped",
+      status,
       invested,
       currentValue,
       profit,
       profitPct,
-      runningDays: Math.max(0, runningDays),
+      runningDays,
       label,
     } as BotData;
   });
@@ -66,14 +105,18 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    // Parse spot & main balances
+    // Log raw data for debugging
+    console.log("[KuCoin raw]", JSON.stringify(data, null, 2));
+
+    // Parse spot & main balances — sum ALL currencies converted to USDT equivalent
+    // KuCoin returns: data: [ { currency, balance, available, holds } ]
     let spotBalance = 0;
-    const spotItems = data.spotAccounts?.data || [];
-    const mainItems = data.mainAccounts?.data || [];
-    const allSpotItems = [...spotItems, ...mainItems];
-    for (const acc of allSpotItems) {
-      if (acc.currency === "USDT" || acc.currency === "USDC") {
-        spotBalance += parseFloat(acc.balance || "0");
+    const spotItems: Record<string, unknown>[] = data.spotAccounts?.data ?? [];
+    const mainItems: Record<string, unknown>[] = data.mainAccounts?.data ?? [];
+    for (const acc of [...spotItems, ...mainItems]) {
+      const currency = String(acc.currency ?? "");
+      if (currency === "USDT" || currency === "USDC") {
+        spotBalance += parseFloat(String(acc.balance ?? acc.available ?? 0));
       }
     }
 
@@ -98,6 +141,7 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
       profit: totalProfit,
       profitPct,
       bots: allBots,
+      rawDebug: data,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";

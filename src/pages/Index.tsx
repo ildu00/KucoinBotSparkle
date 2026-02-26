@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { DebugPanel } from "@/components/DebugPanel";
 import { RefreshCw, Settings, Bot, DollarSign, TrendingUp, Wallet, AlertCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -266,6 +267,11 @@ export default function Dashboard() {
                 <BotsTable bots={allBots} />
               </div>
             )}
+
+            {/* Debug panels */}
+            {accountsData.map((acc) => acc.rawDebug && (
+              <DebugPanel key={acc.label} data={{ account: acc.label, raw: acc.rawDebug }} />
+            ))}
 
             {/* Per-account cards */}
             {accountsData.length > 1 && (
