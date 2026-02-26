@@ -73,8 +73,9 @@ serve(async (req) => {
     const robotSubs = subList.filter((s) => s.subName?.startsWith("robot"));
 
     // Step 2: for each robot sub, get spot from inline tradeAccounts + futures from futures API
+    // Only process first 3 robots to keep response fast for debugging
     const subDetails = await Promise.all(
-      robotSubs.map(async (sub) => {
+      robotSubs.slice(0, 3).map(async (sub) => {
         // Spot balance from inline tradeAccounts (v2 endpoint provides this)
         let spotUSDT = 0;
         for (const type of ["mainAccounts", "tradeAccounts", "tradeHFAccounts"] as const) {
@@ -83,9 +84,12 @@ serve(async (req) => {
           }
         }
 
-        // Futures balance by subName (works without sub-account management permission)
-        const futBal = await f(`/api/v1/account-overview?currency=USDT&subName=${encodeURIComponent(sub.subName)}`);
-        const futuresUSDT = parseFloat(futBal?.data?.accountEquity ?? "0");
+        // Try multiple futures endpoints for sub-accounts
+        const [futByName, futByNameSpot] = await Promise.all([
+          f(`/api/v1/account-overview?currency=USDT&subName=${encodeURIComponent(sub.subName)}`),
+          s(`/api/v1/sub-accounts/${encodeURIComponent(sub.subName)}`),
+        ]);
+        const futuresUSDT = parseFloat(futByName?.data?.accountEquity ?? "0");
 
         return {
           name: sub.subName,
@@ -93,6 +97,10 @@ serve(async (req) => {
           spotUSDT,
           futuresUSDT,
           total: spotUSDT + futuresUSDT,
+          // raw debug
+          _rawV2Sub: { mainAccounts: sub.mainAccounts, tradeAccounts: sub.tradeAccounts, tradeHFAccounts: sub.tradeHFAccounts },
+          _rawFutByName: futByName,
+          _rawSpotByName: futByNameSpot,
         };
       })
     );
@@ -122,6 +130,9 @@ serve(async (req) => {
       subDetails,
       subCount: subList.length,
       userInfoV2: userInfoV2?.data ?? userInfoV2,
+      _rawSubAccountsV2: subAccountsV2,
+      _rawMasterAccounts: masterAccounts,
+      _rawFutMaster: futMaster,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
