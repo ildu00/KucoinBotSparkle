@@ -170,11 +170,31 @@ export default function Dashboard() {
         {/* Dashboard */}
         {accountsData.length > 0 && (
           <div className="space-y-6 animate-fade-in">
-            {/* Error banners */}
+            {/* Error / Diagnosis banners */}
             {accountsData.filter((a) => a.error).map((a) => (
               <div key={a.label} className="flex items-center gap-3 p-4 rounded-lg bg-loss/10 border border-loss/30 text-sm">
                 <AlertCircle className="w-4 h-4 text-loss flex-shrink-0" />
                 <span><strong>{a.label}:</strong> {a.error}</span>
+              </div>
+            ))}
+            {accountsData.filter((a) => a.diagnosis?.startsWith("SUB_ACCOUNT")).map((a) => (
+              <div key={a.label + "diag"} className="p-5 rounded-lg bg-warning/10 border border-warning/30 text-sm space-y-3">
+                <div className="flex items-center gap-2 font-semibold text-warning">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  API Key Issue Detected — {a.label}
+                </div>
+                <p className="text-muted-foreground leading-relaxed">
+                  Your API key appears to be created on a <strong className="text-foreground">sub-account</strong>, not the master account. The ~3708 USDT balance is on the master account.
+                </p>
+                <div className="space-y-1.5 text-muted-foreground">
+                  <p className="font-medium text-foreground text-xs uppercase tracking-widest">How to fix:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-xs leading-relaxed">
+                    <li>Go to <strong className="text-foreground">KuCoin.com → Account → API Management</strong></li>
+                    <li>Make sure you are on the <strong className="text-foreground">Master Account</strong> (not a sub-account page)</li>
+                    <li>Create a new API key with permissions: <strong className="text-foreground">General + Spot Trading + Futures Trading + Sub-Account</strong></li>
+                    <li>Enter the new key here and click Refresh</li>
+                  </ol>
+                </div>
               </div>
             ))}
 
