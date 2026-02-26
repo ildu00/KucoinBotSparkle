@@ -104,6 +104,7 @@ serve(async (req) => {
           spotUSDT,
           futuresUSDT,
           total: spotUSDT + futuresUSDT,
+          _rawFut: futBal,
         };
       })
     );
