@@ -1,5 +1,6 @@
-import { Bot, TrendingUp, TrendingDown, Circle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Bot, TrendingUp, TrendingDown, RotateCcw } from "lucide-react";
+import { resetBaseline } from "@/lib/kucoin";
+import { toast } from "sonner";
 
 export interface BotData {
   id: string;
