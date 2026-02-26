@@ -1,6 +1,8 @@
-import { supabase } from "@/integrations/supabase/client";
 import type { ApiAccount } from "@/components/ApiKeysForm";
 import type { BotData } from "@/components/BotsTable";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export interface AccountData {
   label: string;
@@ -41,16 +43,27 @@ function parseBots(raw: any, type: string, label: string): BotData[] {
 
 export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
   try {
-    const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
-      body: {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/kucoin-proxy`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
         apiKey: account.apiKey,
         apiSecret: account.apiSecret,
         apiPassphrase: account.apiPassphrase,
         action: "overview",
-      },
+      }),
     });
 
-    if (error) throw new Error(error.message);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Edge function error ${res.status}: ${text}`);
+    }
+
+    const data = await res.json();
     if (data.error) throw new Error(data.error);
 
     // Parse spot & main balances
