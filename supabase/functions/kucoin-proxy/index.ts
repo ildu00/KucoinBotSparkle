@@ -57,10 +57,14 @@ serve(async (req) => {
       s("/api/v1/accounts"),
     ]);
 
-    const subList: Array<{ subUserId: string | null; subName: string }> = subAccounts?.data ?? [];
+    const subList: Array<{ subUserId: string | null; subName: string; mainAccounts?: unknown[]; tradeAccounts?: unknown[] }> = subAccounts?.data ?? [];
     const hasSubPermission = subList.some((s) => s.subUserId !== null);
 
-    // Step 2: if we have sub-account IDs, query each one's balance
+    const robotSubs = subList.filter((s) => s.subName?.startsWith("robot"));
+
+    // Step 2: query each sub-account balance
+    // - If we have subUserId: use spot detail endpoint + futures by subName
+    // - If no subUserId: try inline balances from sub-accounts list + futures by subName
     let subDetails: Array<{
       name: string;
       id: string;
@@ -69,31 +73,40 @@ serve(async (req) => {
       total: number;
     }> = [];
 
-    if (hasSubPermission) {
-      const robotSubs = subList.filter((s) => s.subName?.startsWith("robot") && s.subUserId);
-      subDetails = await Promise.all(
-        robotSubs.map(async (sub) => {
-          const [spotDetail, futBal] = await Promise.all([
-            s(`/api/v1/sub-accounts/${sub.subUserId}`),
-            f(`/api/v1/account-overview?currency=USDT&subName=${sub.subName}`),
-          ]);
-          let spotUSDT = 0;
+    subDetails = await Promise.all(
+      robotSubs.map(async (sub) => {
+        // Always try futures by subName (works without sub-account permission)
+        const futBal = await f(`/api/v1/account-overview?currency=USDT&subName=${encodeURIComponent(sub.subName)}`);
+        const futuresUSDT = parseFloat(futBal?.data?.accountEquity ?? "0");
+
+        let spotUSDT = 0;
+
+        if (sub.subUserId) {
+          // Full access: query spot detail by ID
+          const spotDetail = await s(`/api/v1/sub-accounts/${sub.subUserId}`);
           for (const type of ["mainAccounts", "tradeAccounts", "tradeHFAccounts"]) {
-            for (const acc of spotDetail?.data?.[type] ?? []) {
+            for (const acc of (spotDetail?.data?.[type] as Array<{currency:string;balance:string}>) ?? []) {
               if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
             }
           }
-          const futuresUSDT = parseFloat(futBal?.data?.accountEquity ?? "0");
-          return {
-            name: sub.subName,
-            id: sub.subUserId!,
-            spotUSDT,
-            futuresUSDT,
-            total: spotUSDT + futuresUSDT,
-          };
-        })
-      );
-    }
+        } else {
+          // No sub permission: try inline balances returned in sub-accounts list
+          for (const type of ["mainAccounts", "tradeAccounts"] as const) {
+            for (const acc of (sub[type] as Array<{currency:string;balance:string}> | undefined) ?? []) {
+              if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
+            }
+          }
+        }
+
+        return {
+          name: sub.subName,
+          id: sub.subUserId ?? sub.subName,
+          spotUSDT,
+          futuresUSDT,
+          total: spotUSDT + futuresUSDT,
+        };
+      })
+    );
 
     // Master account balances
     let masterUSDT = 0;
