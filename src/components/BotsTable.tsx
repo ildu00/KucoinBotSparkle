@@ -58,10 +58,10 @@ export function BotsTable({ bots, loading }: BotsTableProps) {
       {/* Header */}
       <div className="grid grid-cols-6 gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-widest">
         <span className="col-span-2">Bot / Symbol</span>
-        <span className="text-right">Invested</span>
+        <span className="text-right">Baseline</span>
         <span className="text-right">Value</span>
         <span className="text-right">Profit</span>
-        <span className="text-right">Days</span>
+        <span className="text-right">Reset</span>
       </div>
 
       {bots.map((bot) => {
