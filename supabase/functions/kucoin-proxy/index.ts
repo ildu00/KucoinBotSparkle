@@ -152,7 +152,7 @@ serve(async (req) => {
       subDetails,
       subCount: subList.length,
       userInfoV2: userInfoV2?.data ?? userInfoV2,
-      _botDebug: { spotBots, futuresBots, spotBotsV2, futuresBotsV2 },
+      _botDebug: _botDebug2,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
