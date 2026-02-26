@@ -19,10 +19,11 @@ async function hmacSha256Base64(secret: string, message: string): Promise<string
 
 async function apiCall(
   apiKey: string, apiSecret: string, apiPassphrase: string,
-  baseUrl: string, endpoint: string, method = "GET", body = ""
+  baseUrl: string, endpoint: string
 ) {
+  const method = "GET";
   const timestamp = Date.now().toString();
-  const strToSign = timestamp + method + endpoint + body;
+  const strToSign = timestamp + method + endpoint;
   const signature = await hmacSha256Base64(apiSecret, strToSign);
   const passphraseSign = await hmacSha256Base64(apiSecret, apiPassphrase);
   try {
@@ -36,7 +37,6 @@ async function apiCall(
         "KC-API-KEY-VERSION": "3",
         "Content-Type": "application/json",
       },
-      body: body || undefined,
     });
     return await res.json();
   } catch (e) {
@@ -61,62 +61,102 @@ serve(async (req) => {
     }
 
     const s = (ep: string) => apiCall(apiKey, apiSecret, apiPassphrase, SPOT, ep);
-    const f = (ep: string) => apiCall(apiKey, apiSecret, apiPassphrase, FUT,  ep);
+    const f = (ep: string) => apiCall(apiKey, apiSecret, apiPassphrase, FUT, ep);
 
-    const [
-      // ALL accounts without type filter → shows bot/earn types too
-      allAccounts,
-      // Sub-accounts
-      subAccounts,
-      // Bot type accounts
-      acctBot,
-      acctTradeBot,
-      // KuCoin earn / flexible savings
-      earnList,
-      // Total assets overview
-      assetOverview,
-      // Futures sub-accounts
-      futSubAccounts,
-      // Bot strategy list - new paths
-      botSpot1, botSpot2, botSpot3,
-      botFut1, botFut2, botFut3,
-      // Futures bot positions
-      futBotOrders,
-    ] = await Promise.all([
-      s("/api/v1/accounts"),                                                // ALL types
-      s("/api/v1/sub-accounts"),                                            // sub-accounts list
-      s("/api/v1/accounts?type=bot"),                                       // bot type
-      s("/api/v1/accounts?type=trade_bot"),                                 // trade_bot type
-      s("/api/v1/earn/hold-assets"),                                        // earn holdings
-      s("/api/v1/asset/detail"),                                            // asset overview
-      f("/api/v1/trade-statistics"),                                        // futures stats
-      // Bot strategy endpoints (different patterns)
-      s("/api/v1/bot/strategy/spot/list?pageSize=50&currentPage=1"),
-      s("/api/v1/bot/strategy/futures/list?pageSize=50&currentPage=1"),
-      s("/api/v1/bot/list?pageSize=50&currentPage=1"),
-      f("/api/v1/bot/strategy/futures/list?pageSize=50&currentPage=1"),
-      f("/api/v1/bot/list?pageSize=50&currentPage=1"),
-      f("/api/v1/strategy/list?pageSize=50&currentPage=1"),
-      f("/api/v1/order/strategy?pageSize=50&currentPage=1"),
+    // Step 1: Get master account balances + sub-account list in parallel
+    const [masterTrade, masterMain, subAccountsRaw] = await Promise.all([
+      s("/api/v1/accounts?type=trade"),
+      s("/api/v1/accounts?type=main"),
+      s("/api/v1/sub-accounts"),
     ]);
 
+    // Step 2: Extract robot sub-account names
+    const subList: Array<{ subName: string }> = subAccountsRaw?.data ?? [];
+    const robotNames = subList
+      .map((s) => s.subName)
+      .filter((n) => typeof n === "string" && n.startsWith("robot"));
+
+    // Step 3: For each robot sub-account, query:
+    // (a) its spot balance via /api/v1/sub-accounts/{subName}
+    // (b) its futures balance via futures host (subName param)
+    const subBalanceResults = await Promise.all(
+      robotNames.map(async (name) => {
+        const [spotBal, futBal, futOverview] = await Promise.all([
+          s(`/api/v1/sub-accounts/${name}`),
+          f(`/api/v1/account-overview?subName=${name}&currency=USDT`),
+          f(`/api/v1/account-overview?currency=USDT&subName=${name}`),
+        ]);
+        return { name, spotBal, futBal, futOverview };
+      })
+    );
+
+    // Step 4: Also try getting sub-account aggregated balance endpoints
+    const [
+      subAggBalance,
+      subTransferable,
+      subTotalAssets,
+    ] = await Promise.all([
+      s("/api/v1/sub-accounts/aggregate-balance"),
+      s("/api/v1/accounts/transferable?currency=USDT&type=MAIN"),
+      s("/api/v1/sub-accounts/total-balance?currency=USDT"),
+    ]);
+
+    // Step 5: Parse results
+    let masterBalance = 0;
+    for (const acc of [...(masterTrade?.data ?? []), ...(masterMain?.data ?? [])]) {
+      if (acc.currency === "USDT" || acc.currency === "USDC") {
+        masterBalance += parseFloat(acc.balance ?? "0");
+      }
+    }
+
+    // Try to compute sub-account balances
+    const subBalancesSummary = subBalanceResults.map((r) => {
+      let spotTotal = 0;
+      let futTotal = 0;
+
+      // Spot balance from sub-account detail
+      const subDetail = r.spotBal?.data;
+      if (subDetail) {
+        for (const acc of [
+          ...(subDetail.mainAccounts ?? []),
+          ...(subDetail.tradeAccounts ?? []),
+          ...(subDetail.tradeHFAccounts ?? []),
+        ]) {
+          if (acc.currency === "USDT") spotTotal += parseFloat(acc.balance ?? "0");
+        }
+      }
+
+      // Futures balance
+      const futData = r.futBal?.data ?? r.futOverview?.data;
+      if (futData?.accountEquity) {
+        futTotal = parseFloat(futData.accountEquity ?? "0");
+      }
+
+      return {
+        name: r.name,
+        spotTotal,
+        futTotal,
+        total: spotTotal + futTotal,
+        raw: {
+          spotBal: r.spotBal,
+          futBal: r.futBal,
+        },
+      };
+    });
+
+    const totalSubBalance = subBalancesSummary.reduce((s, r) => s + r.total, 0);
+    const grandTotal = masterBalance + totalSubBalance;
+
     return new Response(JSON.stringify({
-      allAccounts,
-      subAccounts,
-      acctBot,
-      acctTradeBot,
-      earnList,
-      assetOverview,
-      futSubAccounts,
-      botEndpoints: {
-        "SPOT /bot/strategy/spot/list": botSpot1,
-        "SPOT /bot/strategy/futures/list": botSpot2,
-        "SPOT /bot/list": botSpot3,
-        "FUT /bot/strategy/futures/list": botFut1,
-        "FUT /bot/list": botFut2,
-        "FUT /strategy/list": botFut3,
-        "FUT /order/strategy": futBotOrders,
-      },
+      grandTotal,
+      masterBalance,
+      totalSubBalance,
+      masterTrade,
+      masterMain,
+      subAggBalance,
+      subTransferable,
+      subTotalAssets,
+      subBalancesSummary,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
