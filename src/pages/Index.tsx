@@ -71,6 +71,7 @@ export default function Dashboard() {
   // Aggregate totals
   const totalBalance = accountsData.reduce((s, a) => s + a.totalBalance, 0);
   const totalBotBalance = accountsData.reduce((s, a) => s + a.botBalance, 0);
+  const totalFuturesBalance = accountsData.reduce((s, a) => s + (a.futuresBalance ?? 0), 0);
   const totalSpotBalance = accountsData.reduce((s, a) => s + a.spotBalance, 0);
   const totalProfit = accountsData.reduce((s, a) => s + a.profit, 0);
   const allBots: BotData[] = accountsData.flatMap((a) => a.bots);
@@ -79,7 +80,7 @@ export default function Dashboard() {
   const allocationData = accountsData.length > 1
     ? accountsData.map((a) => ({ name: a.label, value: a.totalBalance })).filter((d) => d.value > 0)
     : [
-        { name: "Active Bots", value: totalBotBalance },
+        { name: "Futures / Bots", value: totalFuturesBalance },
         { name: "Spot / Main", value: totalSpotBalance },
       ].filter((d) => d.value > 0);
 
@@ -186,9 +187,9 @@ export default function Dashboard() {
                 highlight
               />
               <StatCard
-                title="Bot Value"
-                value={`$${totalBotBalance.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                subtitle={`${allBots.length} bots total`}
+                title="Futures / Bots"
+                value={`$${totalFuturesBalance.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                subtitle={allBots.length > 0 ? `${allBots.length} bots` : "Futures equity"}
                 icon={<Bot className="w-4 h-4" />}
               />
               <StatCard

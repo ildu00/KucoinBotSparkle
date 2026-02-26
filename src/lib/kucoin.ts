@@ -8,6 +8,7 @@ export interface AccountData {
   label: string;
   totalBalance: number;
   spotBalance: number;
+  futuresBalance: number;
   botBalance: number;
   profit: number;
   profitPct: number;
@@ -18,48 +19,29 @@ export interface AccountData {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseBots(raw: any, type: string, label: string): BotData[] {
-  if (!raw) return [];
-
-  // KuCoin returns: { code: "200000", data: { items: [...] } } or { data: [...] }
+  if (!raw || raw.code === "404" || !raw.data) return [];
   const items: Record<string, unknown>[] =
-    raw?.data?.items ||
-    raw?.data?.list ||
-    raw?.data ||
-    (Array.isArray(raw) ? raw : []);
-
+    raw.data?.items || raw.data?.list || raw.data?.strategies ||
+    (Array.isArray(raw.data) ? raw.data : []);
   if (!Array.isArray(items) || items.length === 0) return [];
 
   return items.map((bot) => {
-    // KuCoin Spot Grid fields
-    // invested / gridAmount / investment / totalInvestment / gridInvestment
-    const invested =
-      parseFloat(String(
-        bot.investment ?? bot.totalInvestment ?? bot.gridInvestment ??
-        bot.investedAmount ?? bot.gridAmount ?? bot.runningAmt ?? 0
-      ));
-
-    // current total value = invested + profit
-    const profit =
-      parseFloat(String(
-        bot.profit ?? bot.totalProfit ?? bot.pnl ?? bot.gridProfit ??
-        bot.totalPnl ?? bot.floatProfit ?? 0
-      ));
-
-    const currentValue =
-      parseFloat(String(
-        bot.totalValue ?? bot.currentValue ?? bot.totalAssets ??
-        bot.curValue ?? 0
-      )) || (invested + profit);
-
+    const invested = parseFloat(String(
+      bot.investment ?? bot.totalInvestment ?? bot.gridInvestment ??
+      bot.investedAmount ?? bot.gridAmount ?? bot.runningAmt ?? 0
+    ));
+    const profit = parseFloat(String(
+      bot.profit ?? bot.totalProfit ?? bot.pnl ?? bot.gridProfit ??
+      bot.totalPnl ?? bot.floatProfit ?? 0
+    ));
+    const currentValue = parseFloat(String(
+      bot.totalValue ?? bot.currentValue ?? bot.totalAssets ?? bot.curValue ?? 0
+    )) || (invested + profit);
     const profitPct = invested > 0 ? (profit / invested) * 100 : 0;
-
-    // startTime can be ms or seconds
     let startTime = bot.startTime ? Number(bot.startTime) : 0;
-    if (startTime > 0 && startTime < 1e12) startTime *= 1000; // convert seconds → ms
+    if (startTime > 0 && startTime < 1e12) startTime *= 1000;
     const runningDays = startTime > 0
-      ? Math.max(0, Math.floor((Date.now() - startTime) / (1000 * 60 * 60 * 24)))
-      : 0;
-
+      ? Math.max(0, Math.floor((Date.now() - startTime) / 86400000)) : 0;
     const rawStatus = String(bot.status ?? bot.state ?? "active").toLowerCase();
     const status: BotData["status"] =
       rawStatus === "active" || rawStatus === "running" ? "active" :
@@ -68,14 +50,7 @@ function parseBots(raw: any, type: string, label: string): BotData[] {
     return {
       id: String(bot.id ?? bot.orderId ?? bot.botId ?? Math.random()),
       symbol: String(bot.symbol ?? bot.tradePair ?? bot.pair ?? ""),
-      type,
-      status,
-      invested,
-      currentValue,
-      profit,
-      profitPct,
-      runningDays,
-      label,
+      type, status, invested, currentValue, profit, profitPct, runningDays, label,
     } as BotData;
   });
 }
@@ -97,46 +72,52 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
       }),
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Edge function error ${res.status}: ${text}`);
-    }
+    if (!res.ok) throw new Error(`Edge function error ${res.status}: ${await res.text()}`);
 
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-
-    // Log raw data for debugging
     console.log("[KuCoin raw]", JSON.stringify(data, null, 2));
 
-    // Parse spot & main balances — sum ALL currencies converted to USDT equivalent
-    // KuCoin returns: data: [ { currency, balance, available, holds } ]
+    // --- Spot balance (USDT/USDC only) ---
     let spotBalance = 0;
-    const spotItems: Record<string, unknown>[] = data.spotAccounts?.data ?? [];
-    const mainItems: Record<string, unknown>[] = data.mainAccounts?.data ?? [];
-    for (const acc of [...spotItems, ...mainItems]) {
-      const currency = String(acc.currency ?? "");
-      if (currency === "USDT" || currency === "USDC") {
-        spotBalance += parseFloat(String(acc.balance ?? acc.available ?? 0));
+    for (const acc of [...(data.spotTrade?.data ?? []), ...(data.spotMain?.data ?? [])]) {
+      const cur = String(acc.currency ?? "");
+      if (cur === "USDT" || cur === "USDC") {
+        spotBalance += parseFloat(String(acc.balance ?? 0));
       }
     }
 
-    // Parse bots
-    const spotBots = parseBots(data.allSpotBots, "SPOT_GRID", account.label);
-    const futuresBots = parseBots(data.allFuturesBots, "FUTURES_GRID", account.label);
-    const infinityBots = parseBots(data.infinityBots, "INFINITY_GRID", account.label);
-    const dcaBots = parseBots(data.dcaBots, "DCA", account.label);
-    const allBots = [...spotBots, ...futuresBots, ...infinityBots, ...dcaBots];
+    // --- Futures balance: accountEquity = full balance including grid bots ---
+    // futuresOverviewUSDT: { accountEquity, unrealisedPNL, positionMargin, ... }
+    const futUSDT = data.futuresOverviewUSDT?.data;
+    const futuresBalance = parseFloat(String(futUSDT?.accountEquity ?? 0));
 
-    const botBalance = allBots.reduce((s, b) => s + b.currentValue, 0);
-    const totalProfit = allBots.reduce((s, b) => s + b.profit, 0);
+    // --- Parse bots from whichever endpoint worked ---
+    const workingSpot = [data.gridV1Spot, data.gridV1SpotOrders, data.gridV2Spot]
+      .find((r) => r?.code === "200000" && r?.data);
+    const workingFutures = [data.gridV1Futures, data.gridV1FuturesOrders, data.gridV2Futures]
+      .find((r) => r?.code === "200000" && r?.data);
+
+    const spotBots = parseBots(workingSpot, "SPOT_GRID", account.label);
+    const futuresBots = parseBots(workingFutures, "FUTURES_GRID", account.label);
+    const allBots = [...spotBots, ...futuresBots];
+
+    // Bot balance: prefer actual bot data, fallback to futures equity (which includes bot funds)
+    const botBalance = allBots.length > 0
+      ? allBots.reduce((s, b) => s + b.currentValue, 0)
+      : futuresBalance;
+
+    const totalProfit = allBots.reduce((s, b) => s + b.profit, 0)
+      + parseFloat(String(futUSDT?.unrealisedPNL ?? 0));
     const totalInvested = allBots.reduce((s, b) => s + b.invested, 0);
     const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-    const totalBalance = spotBalance + botBalance;
+    const totalBalance = spotBalance + futuresBalance;
 
     return {
       label: account.label,
       totalBalance,
       spotBalance,
+      futuresBalance,
       botBalance,
       profit: totalProfit,
       profitPct,
@@ -149,6 +130,7 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
       label: account.label,
       totalBalance: 0,
       spotBalance: 0,
+      futuresBalance: 0,
       botBalance: 0,
       profit: 0,
       profitPct: 0,
