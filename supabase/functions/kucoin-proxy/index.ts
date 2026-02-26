@@ -1,19 +1,25 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createHmac } from "https://deno.land/std@0.168.0/crypto/mod.ts";
-import { encode as base64Encode } from "https://deno.land/std@0.132.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-function sign(message: string, secret: string): string {
-  const encoder = new TextEncoder();
-  const key = encoder.encode(secret);
-  const msg = encoder.encode(message);
-  const hmac = createHmac("sha256", key);
-  hmac.update(msg);
-  return base64Encode(hmac.digest());
+async function hmacSha256Base64(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  // base64 encode
+  const bytes = new Uint8Array(sig);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
 }
 
 async function kucoinRequest(
@@ -26,8 +32,8 @@ async function kucoinRequest(
 ) {
   const timestamp = Date.now().toString();
   const strToSign = timestamp + method + endpoint + body;
-  const signature = sign(strToSign, apiSecret);
-  const passphraseSign = sign(apiPassphrase, apiSecret);
+  const signature = await hmacSha256Base64(apiSecret, strToSign);
+  const passphraseSign = await hmacSha256Base64(apiSecret, apiPassphrase);
 
   const headers: Record<string, string> = {
     "KC-API-KEY": apiKey,
@@ -45,8 +51,7 @@ async function kucoinRequest(
     body: body || undefined,
   });
 
-  const data = await res.json();
-  return data;
+  return await res.json();
 }
 
 serve(async (req) => {
@@ -67,39 +72,26 @@ serve(async (req) => {
     const result: Record<string, unknown> = {};
 
     if (action === "overview" || !action) {
-      // Spot accounts
-      const spotAccounts = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=trade");
+      // Fetch all in parallel
+      const [spotAccounts, mainAccounts, spotBots, allSpotBots, futuresBots, allFuturesBots, infinityBots, dcaBots] =
+        await Promise.all([
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=trade"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=main"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/spot/list?status=active&pageSize=50&currentPage=1"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/spot/list?pageSize=50&currentPage=1"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/futures/list?status=active&pageSize=50&currentPage=1"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/futures/list?pageSize=50&currentPage=1"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/infinity/list?pageSize=50&currentPage=1"),
+          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/dca/list?pageSize=50&currentPage=1"),
+        ]);
+
       result.spotAccounts = spotAccounts;
-
-      // Spot main accounts
-      const mainAccounts = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=main");
       result.mainAccounts = mainAccounts;
-
-      // Margin accounts
-      const marginAccounts = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=margin");
-      result.marginAccounts = marginAccounts;
-
-      // Active spot grid bots
-      const spotBots = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/spot/list?status=active&pageSize=50&currentPage=1");
       result.spotBots = spotBots;
-
-      // Spot grid bots details (all statuses)
-      const allSpotBots = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/spot/list?pageSize=50&currentPage=1");
       result.allSpotBots = allSpotBots;
-
-      // Futures grid bots
-      const futuresBots = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/futures/list?status=active&pageSize=50&currentPage=1");
       result.futuresBots = futuresBots;
-
-      const allFuturesBots = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/futures/list?pageSize=50&currentPage=1");
       result.allFuturesBots = allFuturesBots;
-
-      // Infinity grid bots
-      const infinityBots = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/infinity/list?pageSize=50&currentPage=1");
       result.infinityBots = infinityBots;
-
-      // DCA bots
-      const dcaBots = await kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/dca/list?pageSize=50&currentPage=1");
       result.dcaBots = dcaBots;
     }
 
