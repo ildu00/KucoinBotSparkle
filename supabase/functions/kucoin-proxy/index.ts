@@ -63,100 +63,59 @@ serve(async (req) => {
     const s = (ep: string) => apiCall(apiKey, apiSecret, apiPassphrase, SPOT, ep);
     const f = (ep: string) => apiCall(apiKey, apiSecret, apiPassphrase, FUT, ep);
 
-    // Step 1: Get master account balances + sub-account list in parallel
-    const [masterTrade, masterMain, subAccountsRaw] = await Promise.all([
-      s("/api/v1/accounts?type=trade"),
-      s("/api/v1/accounts?type=main"),
+    // Diagnose the account type first
+    const [userInfo, subAccounts, allAccounts, futUSDT] = await Promise.all([
+      s("/api/v1/user-info"),
       s("/api/v1/sub-accounts"),
+      s("/api/v1/accounts"),
+      f("/api/v1/account-overview?currency=USDT"),
     ]);
 
-    // Step 2: Extract robot sub-account names
-    const subList: Array<{ subName: string }> = subAccountsRaw?.data ?? [];
-    const robotNames = subList
-      .map((s) => s.subName)
-      .filter((n) => typeof n === "string" && n.startsWith("robot"));
+    // Determine if this is a sub-account or master account
+    // Master account: userInfo.data.level should be 0 or not present
+    // Sub-account: userInfo might show "subUser: true" or level > 0
+    const subUserIds = (subAccounts?.data ?? []).map((s: { subUserId: string }) => s.subUserId).filter(Boolean);
+    const isMasterAccount = subUserIds.length > 0 || (subAccounts?.data?.length > 0);
+    
+    // If master, subUserId should NOT be null
+    const hasNullSubUserIds = (subAccounts?.data ?? []).some((s: { subUserId: null | string }) => s.subUserId === null);
 
-    // Step 3: For each robot sub-account, query:
-    // (a) its spot balance via /api/v1/sub-accounts/{subName}
-    // (b) its futures balance via futures host (subName param)
-    const subBalanceResults = await Promise.all(
-      robotNames.map(async (name) => {
-        const [spotBal, futBal, futOverview] = await Promise.all([
-          s(`/api/v1/sub-accounts/${name}`),
-          f(`/api/v1/account-overview?subName=${name}&currency=USDT`),
-          f(`/api/v1/account-overview?currency=USDT&subName=${name}`),
-        ]);
-        return { name, spotBal, futBal, futOverview };
-      })
-    );
+    // Calculate whatever balance we can find
+    let totalBalance = 0;
+    const balanceDetails: Record<string, number> = {};
 
-    // Step 4: Also try getting sub-account aggregated balance endpoints
-    const [
-      subAggBalance,
-      subTransferable,
-      subTotalAssets,
-    ] = await Promise.all([
-      s("/api/v1/sub-accounts/aggregate-balance"),
-      s("/api/v1/accounts/transferable?currency=USDT&type=MAIN"),
-      s("/api/v1/sub-accounts/total-balance?currency=USDT"),
-    ]);
-
-    // Step 5: Parse results
-    let masterBalance = 0;
-    for (const acc of [...(masterTrade?.data ?? []), ...(masterMain?.data ?? [])]) {
-      if (acc.currency === "USDT" || acc.currency === "USDC") {
-        masterBalance += parseFloat(acc.balance ?? "0");
+    for (const acc of allAccounts?.data ?? []) {
+      const bal = parseFloat(acc.balance ?? "0");
+      if (bal > 0) {
+        balanceDetails[`${acc.type}_${acc.currency}`] = bal;
+        if (acc.currency === "USDT" || acc.currency === "USDC") totalBalance += bal;
       }
     }
 
-    // Try to compute sub-account balances
-    const subBalancesSummary = subBalanceResults.map((r) => {
-      let spotTotal = 0;
-      let futTotal = 0;
+    const futEquity = parseFloat(futUSDT?.data?.accountEquity ?? "0");
+    if (futEquity > 0) {
+      balanceDetails["futures_USDT"] = futEquity;
+      totalBalance += futEquity;
+    }
 
-      // Spot balance from sub-account detail
-      const subDetail = r.spotBal?.data;
-      if (subDetail) {
-        for (const acc of [
-          ...(subDetail.mainAccounts ?? []),
-          ...(subDetail.tradeAccounts ?? []),
-          ...(subDetail.tradeHFAccounts ?? []),
-        ]) {
-          if (acc.currency === "USDT") spotTotal += parseFloat(acc.balance ?? "0");
-        }
-      }
-
-      // Futures balance
-      const futData = r.futBal?.data ?? r.futOverview?.data;
-      if (futData?.accountEquity) {
-        futTotal = parseFloat(futData.accountEquity ?? "0");
-      }
-
-      return {
-        name: r.name,
-        spotTotal,
-        futTotal,
-        total: spotTotal + futTotal,
-        raw: {
-          spotBal: r.spotBal,
-          futBal: r.futBal,
-        },
-      };
-    });
-
-    const totalSubBalance = subBalancesSummary.reduce((s, r) => s + r.total, 0);
-    const grandTotal = masterBalance + totalSubBalance;
+    // Diagnosis
+    const diagnosis = hasNullSubUserIds
+      ? "SUB_ACCOUNT_KEY: Your API key appears to be from a sub-account. The master account holds the 3708 USDT. Please create a new API key on your MASTER account (not sub-account)."
+      : totalBalance === 0
+      ? "ZERO_BALANCE: API key valid but all balances are 0. Possible: wrong account, or funds locked in trading bots that require special permissions."
+      : "OK";
 
     return new Response(JSON.stringify({
-      grandTotal,
-      masterBalance,
-      totalSubBalance,
-      masterTrade,
-      masterMain,
-      subAggBalance,
-      subTransferable,
-      subTotalAssets,
-      subBalancesSummary,
+      diagnosis,
+      totalBalance,
+      balanceDetails,
+      accountKeyInfo: {
+        hasNullSubUserIds,
+        subAccountCount: subAccounts?.data?.length ?? 0,
+        userInfo: userInfo?.data ?? userInfo,
+      },
+      rawAccounts: allAccounts?.data ?? [],
+      futuresUSDT: futUSDT?.data,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
