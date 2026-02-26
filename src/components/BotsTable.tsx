@@ -103,7 +103,18 @@ export function BotsTable({ bots, loading }: BotsTableProps) {
             </div>
 
             <div className="text-right">
-              <div className="font-mono text-sm text-muted-foreground">{bot.runningDays}d</div>
+              <button
+                title="Reset baseline to current value"
+                onClick={async () => {
+                  if (bot.label) {
+                    await resetBaseline(bot.label, bot.symbol);
+                    toast.success(`Baseline reset for ${bot.symbol}`);
+                  }
+                }}
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         );
