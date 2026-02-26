@@ -1,73 +1,100 @@
-# Welcome to your Lovable project
+# KuCoin Bot Dashboard 🤖
 
-## Project info
+A real-time monitoring dashboard for KuCoin trading bot sub-accounts. Track spot and futures balances, profit/loss per robot, and overall portfolio performance — all from a single interface.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+---
 
-## How can I edit this code?
+## Features
 
-There are several ways of editing your application.
+- **Multi-account support** — Add multiple KuCoin API accounts and switch between them
+- **Bot sub-account monitoring** — Automatically detects all `robot*` sub-accounts
+- **Spot + Futures balances** — Fetches spot balances via `/api/v2/sub-accounts` and futures equity via `/api/v1/account-overview-all` (KuCoin Futures API)
+- **Profit tracking** — On first load, the current balance is stored as a baseline. Subsequent refreshes calculate profit relative to that snapshot
+- **Reset baseline** — Per-bot reset button to set a new starting point (e.g. after adding capital)
+- **Master account overview** — Displays master spot + futures balance separately
+- **Summary stats** — Total portfolio value, total profit, number of active bots
+- **Charts** — Visualize balance distribution and profit history
+- **Debug panel** — Raw API response inspector for troubleshooting
 
-**Use Lovable**
+---
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Tech Stack
 
-Changes made via Lovable will be committed automatically to this repo.
+| Layer | Technology |
+|---|---|
+| Frontend | React 18 + TypeScript + Vite |
+| Styling | Tailwind CSS + shadcn/ui |
+| State / Data | TanStack Query v5 |
+| Backend | Edge Function (Deno) |
+| Database | PostgreSQL (via cloud) |
+| Charts | Recharts |
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Architecture
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+Browser (React)
+    │
+    ▼
+Edge Function: kucoin-proxy
+    │
+    ├── KuCoin Spot API (api.kucoin.com)
+    │       ├── GET /api/v2/sub-accounts?pageSize=100   — spot balances per sub
+    │       └── GET /api/v1/accounts                    — master spot balance
+    │
+    └── KuCoin Futures API (api-futures.kucoin.com)
+            └── GET /api/v1/account-overview-all?currency=USDT  — all sub futures equity
 ```
 
-**Edit a file directly in GitHub**
+All three API calls are made in **parallel** inside the edge function.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## Database
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sql
+CREATE TABLE public.bot_baselines (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_label text NOT NULL,
+  bot_name      text NOT NULL,
+  baseline_balance numeric NOT NULL,
+  recorded_at   timestamptz NOT NULL DEFAULT now()
+);
+```
 
-## What technologies are used for this project?
+---
 
-This project is built with:
+## Setup
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```bash
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+bun install
+bun run dev
+```
 
-## How can I deploy this project?
+---
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## KuCoin API Key Requirements
 
-## Can I connect a custom domain to my Lovable project?
+- **General** — required for master account balance
+- **Sub-account read** — required to list sub-accounts and their balances
+- **Futures read** — required for `/api/v1/account-overview-all`
 
-Yes, you can!
+Read-only keys only. No trading permissions needed.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+---
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## Profit Calculation
+
+```
+profit = currentBalance - baselineBalance
+profitPct = (profit / baselineBalance) × 100
+```
+
+---
+
+## License
+
+MIT
