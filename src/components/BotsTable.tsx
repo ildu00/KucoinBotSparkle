@@ -1,5 +1,6 @@
-import { Bot, TrendingUp, TrendingDown, Circle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Bot, TrendingUp, TrendingDown, RotateCcw } from "lucide-react";
+import { resetBaseline } from "@/lib/kucoin";
+import { toast } from "sonner";
 
 export interface BotData {
   id: string;
@@ -57,10 +58,10 @@ export function BotsTable({ bots, loading }: BotsTableProps) {
       {/* Header */}
       <div className="grid grid-cols-6 gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-widest">
         <span className="col-span-2">Bot / Symbol</span>
-        <span className="text-right">Invested</span>
+        <span className="text-right">Baseline</span>
         <span className="text-right">Value</span>
         <span className="text-right">Profit</span>
-        <span className="text-right">Days</span>
+        <span className="text-right">Reset</span>
       </div>
 
       {bots.map((bot) => {
@@ -102,7 +103,18 @@ export function BotsTable({ bots, loading }: BotsTableProps) {
             </div>
 
             <div className="text-right">
-              <div className="font-mono text-sm text-muted-foreground">{bot.runningDays}d</div>
+              <button
+                title="Reset baseline to current value"
+                onClick={async () => {
+                  if (bot.label) {
+                    await resetBaseline(bot.label, bot.symbol);
+                    toast.success(`Baseline reset for ${bot.symbol}`);
+                  }
+                }}
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         );

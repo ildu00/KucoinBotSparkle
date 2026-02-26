@@ -18,6 +18,31 @@ export interface AccountData {
   rawDebug?: unknown;
 }
 
+async function getOrCreateBaseline(accountLabel: string, botName: string, currentBalance: number): Promise<number> {
+  // Try to fetch existing baseline
+  const { data } = await supabase
+    .from("bot_baselines")
+    .select("baseline_balance")
+    .eq("account_label", accountLabel)
+    .eq("bot_name", botName)
+    .maybeSingle();
+
+  if (data) {
+    return parseFloat(String(data.baseline_balance));
+  }
+
+  // No baseline yet — store current balance as baseline
+  if (currentBalance > 0) {
+    await supabase.from("bot_baselines").insert({
+      account_label: accountLabel,
+      bot_name: botName,
+      baseline_balance: currentBalance,
+    });
+  }
+
+  return currentBalance;
+}
+
 export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
   const empty = (diag?: AccountData["diagnosis"], error?: string): AccountData => ({
     label: account.label,
@@ -37,21 +62,34 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
     const subTotal = parseFloat(String(data.subTotal ?? 0));
 
-    // Build bot list from sub-account details
-    const bots: BotData[] = (data.subDetails ?? []).map((sub: {
-      name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number;
-    }) => ({
-      id: sub.id || sub.name,
-      symbol: sub.name,
-      type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-      status: "active" as const,
-      invested: sub.total,
-      currentValue: sub.total,
-      profit: 0,
-      profitPct: 0,
-      runningDays: 0,
-      label: account.label,
-    }));
+    type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
+
+    // Build bot list with profit from baselines
+    const subDetailsList: SubDetail[] = data.subDetails ?? [];
+    const bots: BotData[] = await Promise.all(
+      subDetailsList.map(async (sub) => {
+        const baseline = await getOrCreateBaseline(account.label, sub.name, sub.total);
+        const profit = sub.total - baseline;
+        const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+
+        return {
+          id: sub.id || sub.name,
+          symbol: sub.name,
+          type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+          status: "active" as const,
+          invested: baseline,
+          currentValue: sub.total,
+          profit,
+          profitPct,
+          runningDays: 0,
+          label: account.label,
+        };
+      })
+    );
+
+    const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
+    const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
+    const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
 
     return {
       label: account.label,
@@ -59,8 +97,8 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
       spotBalance: masterUSDT,
       futuresBalance: subTotal,
       botBalance: subTotal,
-      profit: 0,
-      profitPct: 0,
+      profit: totalProfit,
+      profitPct,
       bots,
       diagnosis: data.diagnosis,
       hasSubPermission: data.hasSubPermission,
@@ -70,4 +108,10 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
   } catch (err) {
     return empty(undefined, err instanceof Error ? err.message : "Unknown error");
   }
+}
+
+export async function resetBaseline(accountLabel: string, botName: string): Promise<void> {
+  await supabase.from("bot_baselines").delete()
+    .eq("account_label", accountLabel)
+    .eq("bot_name", botName);
 }

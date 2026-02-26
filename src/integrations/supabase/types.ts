@@ -14,7 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bot_baselines: {
+        Row: {
+          account_label: string
+          baseline_balance: number
+          bot_name: string
+          id: string
+          recorded_at: string
+        }
+        Insert: {
+          account_label: string
+          baseline_balance: number
+          bot_name: string
+          id?: string
+          recorded_at?: string
+        }
+        Update: {
+          account_label?: string
+          baseline_balance?: number
+          bot_name?: string
+          id?: string
+          recorded_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
