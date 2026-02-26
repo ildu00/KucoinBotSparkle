@@ -50,53 +50,42 @@ serve(async (req) => {
     const s = (ep: string) => apiCall(ak, as_, ap, SPOT, ep);
     const f = (ep: string) => apiCall(ak, as_, ap, FUT,  ep);
 
-    // Step 1: get sub-accounts list (need Sub-Account permission for non-null IDs)
-    const [subAccounts, userInfoV2, masterAccounts] = await Promise.all([
-      s("/api/v1/sub-accounts"),
+    // Step 1: get all data in parallel
+    const [subAccountsV2, userInfoV2, masterAccounts, futMaster] = await Promise.all([
+      // v2 endpoint returns inline tradeAccounts balances even for robot sub-accounts
+      // (confirmed by KuCoin support: https://www.kucoin.com/docs-new/rest/account-info/sub-account/get-subaccount-list-spot-balance-v2)
+      s("/api/v2/sub-accounts?pageSize=100"),
       s("/api/v2/user-info"),
       s("/api/v1/accounts"),
+      f("/api/v1/account-overview?currency=USDT"),
     ]);
 
-    const subList: Array<{ subUserId: string | null; subName: string; mainAccounts?: unknown[]; tradeAccounts?: unknown[] }> = subAccounts?.data ?? [];
-    const hasSubPermission = subList.some((s) => s.subUserId !== null);
+    type SubV2Item = {
+      subUserId: string | null;
+      subName: string;
+      mainAccounts: Array<{ currency: string; balance: string }>;
+      tradeAccounts: Array<{ currency: string; balance: string }>;
+      tradeHFAccounts: Array<{ currency: string; balance: string }>;
+    };
 
+    const subList: SubV2Item[] = subAccountsV2?.data?.items ?? subAccountsV2?.data ?? [];
+    const hasSubPermission = subList.some((s) => s.subUserId !== null);
     const robotSubs = subList.filter((s) => s.subName?.startsWith("robot"));
 
-    // Step 2: query each sub-account balance
-    // - If we have subUserId: use spot detail endpoint + futures by subName
-    // - If no subUserId: try inline balances from sub-accounts list + futures by subName
-    let subDetails: Array<{
-      name: string;
-      id: string;
-      spotUSDT: number;
-      futuresUSDT: number;
-      total: number;
-    }> = [];
-
-    subDetails = await Promise.all(
+    // Step 2: for each robot sub, get spot from inline tradeAccounts + futures from futures API
+    const subDetails = await Promise.all(
       robotSubs.map(async (sub) => {
-        // Always try futures by subName (works without sub-account permission)
-        const futBal = await f(`/api/v1/account-overview?currency=USDT&subName=${encodeURIComponent(sub.subName)}`);
-        const futuresUSDT = parseFloat(futBal?.data?.accountEquity ?? "0");
-
+        // Spot balance from inline tradeAccounts (v2 endpoint provides this)
         let spotUSDT = 0;
-
-        if (sub.subUserId) {
-          // Full access: query spot detail by ID
-          const spotDetail = await s(`/api/v1/sub-accounts/${sub.subUserId}`);
-          for (const type of ["mainAccounts", "tradeAccounts", "tradeHFAccounts"]) {
-            for (const acc of (spotDetail?.data?.[type] as Array<{currency:string;balance:string}>) ?? []) {
-              if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
-            }
-          }
-        } else {
-          // No sub permission: try inline balances returned in sub-accounts list
-          for (const type of ["mainAccounts", "tradeAccounts"] as const) {
-            for (const acc of (sub[type] as Array<{currency:string;balance:string}> | undefined) ?? []) {
-              if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
-            }
+        for (const type of ["mainAccounts", "tradeAccounts", "tradeHFAccounts"] as const) {
+          for (const acc of sub[type] ?? []) {
+            if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
           }
         }
+
+        // Futures balance by subName (works without sub-account management permission)
+        const futBal = await f(`/api/v1/account-overview?currency=USDT&subName=${encodeURIComponent(sub.subName)}`);
+        const futuresUSDT = parseFloat(futBal?.data?.accountEquity ?? "0");
 
         return {
           name: sub.subName,
@@ -104,44 +93,25 @@ serve(async (req) => {
           spotUSDT,
           futuresUSDT,
           total: spotUSDT + futuresUSDT,
-          _rawFut: futBal,
         };
       })
     );
 
-    // Bot orders (KuCoin built-in bots)
-    // Probe multiple possible bot endpoints to find the correct one
-    const [b1, b2, b3, b4, b5, b6, b7, b8] = await Promise.all([
-      s("/api/v1/spot-bot/orders?status=active"),
-      f("/api/v1/futures-bot/orders?status=active"),
-      s("/api/v2/bot/spot/orders?status=active"),
-      f("/api/v2/bot/futures/orders?status=active"),
-      s("/api/v1/bot/spot/orders?status=active"),
-      f("/api/v1/bot/futures/orders?status=active"),
-      s("/api/v3/spot-bot/orders?status=active"),
-      f("/api/v3/futures-bot/orders?status=active"),
-    ]);
-    const spotBots = b1; const futuresBots = b2; const spotBotsV2 = b3; const futuresBotsV2 = b4;
-    const _botDebug2 = { b1, b2, b3, b4, b5, b6, b7, b8 };
-
     // Master account balances
     let masterUSDT = 0;
     for (const acc of masterAccounts?.data ?? []) {
-      if (acc.currency === "USDT") masterUSDT += parseFloat(acc.balance ?? "0");
+      if ((acc as {currency:string}).currency === "USDT") {
+        masterUSDT += parseFloat((acc as {balance:string}).balance ?? "0");
+      }
     }
-    const futMaster = await f("/api/v1/account-overview?currency=USDT");
     masterUSDT += parseFloat(futMaster?.data?.accountEquity ?? "0");
 
     const subTotal = subDetails.reduce((s, r) => s + r.total, 0);
     const grandTotal = masterUSDT + subTotal;
 
     // Determine diagnosis
-    let diagnosis: "OK" | "MISSING_SUB_PERMISSION" | "ZERO_ALL" = "OK";
-    if (!hasSubPermission && subList.length > 0) {
-      diagnosis = "MISSING_SUB_PERMISSION";
-    } else if (grandTotal === 0) {
-      diagnosis = "ZERO_ALL";
-    }
+    const diagnosis: "OK" | "MISSING_SUB_PERMISSION" | "ZERO_ALL" =
+      grandTotal === 0 ? "ZERO_ALL" : "OK";
 
     return new Response(JSON.stringify({
       diagnosis,
@@ -152,7 +122,6 @@ serve(async (req) => {
       subDetails,
       subCount: subList.length,
       userInfoV2: userInfoV2?.data ?? userInfoV2,
-      _botDebug: _botDebug2,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
