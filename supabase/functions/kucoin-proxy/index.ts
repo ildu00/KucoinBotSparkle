@@ -110,12 +110,19 @@ serve(async (req) => {
     );
 
     // Bot orders (KuCoin built-in bots)
-    const [spotBots, futuresBots, spotBotsV2, futuresBotsV2] = await Promise.all([
+    // Probe multiple possible bot endpoints to find the correct one
+    const [b1, b2, b3, b4, b5, b6, b7, b8] = await Promise.all([
       s("/api/v1/spot-bot/orders?status=active"),
       f("/api/v1/futures-bot/orders?status=active"),
       s("/api/v2/bot/spot/orders?status=active"),
-      s("/api/v2/bot/futures/orders?status=active"),
+      f("/api/v2/bot/futures/orders?status=active"),
+      s("/api/v1/bot/spot/orders?status=active"),
+      f("/api/v1/bot/futures/orders?status=active"),
+      s("/api/v3/spot-bot/orders?status=active"),
+      f("/api/v3/futures-bot/orders?status=active"),
     ]);
+    const spotBots = b1; const futuresBots = b2; const spotBotsV2 = b3; const futuresBotsV2 = b4;
+    const _botDebug2 = { b1, b2, b3, b4, b5, b6, b7, b8 };
 
     // Master account balances
     let masterUSDT = 0;
@@ -145,7 +152,7 @@ serve(async (req) => {
       subDetails,
       subCount: subList.length,
       userInfoV2: userInfoV2?.data ?? userInfoV2,
-      _botDebug: { spotBots, futuresBots, spotBotsV2, futuresBotsV2 },
+      _botDebug: _botDebug2,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
