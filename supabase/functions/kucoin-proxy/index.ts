@@ -8,24 +8,20 @@ const corsHeaders = {
 async function hmacSha256Base64(secret: string, message: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
+    "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
   );
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-  // base64 encode
   const bytes = new Uint8Array(sig);
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
 }
 
-async function kucoinRequest(
+async function signedRequest(
   apiKey: string,
   apiSecret: string,
   apiPassphrase: string,
+  baseUrl: string,
   endpoint: string,
   method = "GET",
   body = ""
@@ -44,15 +40,16 @@ async function kucoinRequest(
     "Content-Type": "application/json",
   };
 
-  const url = `https://api.kucoin.com${endpoint}`;
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: body || undefined,
-  });
-
-  return await res.json();
+  try {
+    const res = await fetch(`${baseUrl}${endpoint}`, { method, headers, body: body || undefined });
+    return await res.json();
+  } catch (e) {
+    return { error: String(e) };
+  }
 }
+
+const SPOT_BASE = "https://api.kucoin.com";
+const FUTURES_BASE = "https://api-futures.kucoin.com";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,40 +57,57 @@ serve(async (req) => {
   }
 
   try {
-    const { apiKey, apiSecret, apiPassphrase, action } = await req.json();
+    const { apiKey, apiSecret, apiPassphrase } = await req.json();
 
     if (!apiKey || !apiSecret || !apiPassphrase) {
       return new Response(JSON.stringify({ error: "Missing API credentials" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const result: Record<string, unknown> = {};
+    const call = (base: string, ep: string) => signedRequest(apiKey, apiSecret, apiPassphrase, base, ep);
 
-    if (action === "overview" || !action) {
-      // Fetch all in parallel
-      const [spotAccounts, mainAccounts, spotBots, allSpotBots, futuresBots, allFuturesBots, infinityBots, dcaBots] =
-        await Promise.all([
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=trade"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/accounts?type=main"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/spot/list?status=active&pageSize=50&currentPage=1"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/spot/list?pageSize=50&currentPage=1"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/futures/list?status=active&pageSize=50&currentPage=1"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/futures/list?pageSize=50&currentPage=1"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/infinity/list?pageSize=50&currentPage=1"),
-          kucoinRequest(apiKey, apiSecret, apiPassphrase, "/api/v1/grid/strategy/dca/list?pageSize=50&currentPage=1"),
-        ]);
+    // Fetch everything in parallel
+    const [
+      spotTrade,
+      spotMain,
+      futuresOverviewUSDT,
+      futuresOverviewXBT,
+      // Try all possible grid bot list endpoints
+      gridV1Spot,
+      gridV1Futures,
+      gridV1SpotOrders,
+      gridV1FuturesOrders,
+      gridV2Spot,
+      gridV2Futures,
+    ] = await Promise.all([
+      // Spot balances
+      call(SPOT_BASE, "/api/v1/accounts?type=trade"),
+      call(SPOT_BASE, "/api/v1/accounts?type=main"),
+      // Futures account overview (this INCLUDES grid bot locked funds)
+      call(FUTURES_BASE, "/api/v1/account-overview?currency=USDT"),
+      call(FUTURES_BASE, "/api/v1/account-overview?currency=XBT"),
+      // Grid bot endpoints - trying multiple paths
+      call(SPOT_BASE, "/api/v1/grid/strategy/spot?status=active&pageSize=50&currentPage=1"),
+      call(SPOT_BASE, "/api/v1/grid/strategy/futures?status=active&pageSize=50&currentPage=1"),
+      call(SPOT_BASE, "/api/v1/grid/strategy/spot?pageSize=50&currentPage=1"),
+      call(SPOT_BASE, "/api/v1/grid/strategy/futures?pageSize=50&currentPage=1"),
+      call(SPOT_BASE, "/api/v2/grid/strategy/spot?pageSize=50&currentPage=1"),
+      call(SPOT_BASE, "/api/v2/grid/strategy/futures?pageSize=50&currentPage=1"),
+    ]);
 
-      result.spotAccounts = spotAccounts;
-      result.mainAccounts = mainAccounts;
-      result.spotBots = spotBots;
-      result.allSpotBots = allSpotBots;
-      result.futuresBots = futuresBots;
-      result.allFuturesBots = allFuturesBots;
-      result.infinityBots = infinityBots;
-      result.dcaBots = dcaBots;
-    }
+    const result = {
+      spotTrade,
+      spotMain,
+      futuresOverviewUSDT,
+      futuresOverviewXBT,
+      gridV1Spot,
+      gridV1Futures,
+      gridV1SpotOrders,
+      gridV1FuturesOrders,
+      gridV2Spot,
+      gridV2Futures,
+    };
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -101,8 +115,7 @@ serve(async (req) => {
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
