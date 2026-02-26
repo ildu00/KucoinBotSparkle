@@ -177,7 +177,31 @@ export default function Dashboard() {
                 <span><strong>{a.label}:</strong> {a.error}</span>
               </div>
             ))}
-            {accountsData.filter((a) => a.diagnosis?.startsWith("SUB_ACCOUNT")).map((a) => (
+            {accountsData.filter((a) => a.diagnosis === "MISSING_SUB_PERMISSION").map((a) => (
+              <div key={a.label + "_perm"} className="p-5 rounded-lg bg-warning/10 border border-warning/40 space-y-3">
+                <div className="flex items-center gap-2 font-semibold text-warning text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  Action Required — Missing "Sub-Account" Permission ({a.label})
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Found <strong className="text-foreground">{a.subCount} trading bot sub-accounts</strong> (robot…), but balances are hidden. Your API key is missing <strong className="text-foreground">Sub-Account Management</strong> permission.
+                </p>
+                <div className="bg-secondary rounded-lg p-4 space-y-2 text-sm">
+                  <p className="font-semibold text-xs uppercase tracking-widest text-muted-foreground mb-2">Fix — 3 steps:</p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground leading-relaxed">
+                    <li>Open <strong className="text-foreground">KuCoin → Account → API Management</strong></li>
+                    <li>Create a new API key and check these permissions:
+                      <div className="mt-1.5 ml-5 flex flex-wrap gap-1.5">
+                        {["General", "Spot Trading", "Futures Trading", "Sub-Account Management"].map(p => (
+                          <span key={p} className="px-2 py-0.5 rounded text-xs font-mono bg-primary/20 text-primary border border-primary/30">{p}</span>
+                        ))}
+                      </div>
+                    </li>
+                    <li>Enter the new key above and click <strong className="text-foreground">Refresh</strong></li>
+                  </ol>
+                </div>
+              </div>
+            ))}
               <div key={a.label + "diag"} className="p-5 rounded-lg bg-warning/10 border border-warning/30 text-sm space-y-3">
                 <div className="flex items-center gap-2 font-semibold text-warning">
                   <AlertCircle className="w-4 h-4 flex-shrink-0" />
