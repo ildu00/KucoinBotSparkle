@@ -81,10 +81,6 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
     return empty(undefined, msg);
   }
 
-  if (error) {
-    return empty(undefined, error.message ?? "Unknown error");
-  }
-
   const d = data as Record<string, unknown>;
   if (d?.error) return empty(undefined, String(d.error));
 
