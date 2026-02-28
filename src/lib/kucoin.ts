@@ -51,12 +51,24 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  try {
-    const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
-      body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
-    });
-    if (error) throw new Error(error.message);
-    if (data?.error) throw new Error(data.error);
+  const maxRetries = 3;
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
+        body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
+      });
+      if (error) {
+        // "Failed to send a request" = cold start / network blip, retry
+        if (attempt < maxRetries && error.message?.includes("Failed to send")) {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+          lastError = new Error(error.message);
+          continue;
+        }
+        throw new Error(error.message);
+      }
+      if (data?.error) throw new Error(data.error);
 
     const grandTotal = parseFloat(String(data.grandTotal ?? 0));
     const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
