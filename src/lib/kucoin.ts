@@ -18,29 +18,37 @@ export interface AccountData {
   rawDebug?: unknown;
 }
 
-async function getOrCreateBaseline(accountLabel: string, botName: string, currentBalance: number): Promise<number> {
-  // Try to fetch existing baseline
+async function getBatchBaselines(
+  accountLabel: string,
+  subs: Array<{ name: string; total: number }>
+): Promise<Map<string, number>> {
+  const botNames = subs.map((s) => s.name);
+
   const { data } = await supabase
     .from("bot_baselines")
-    .select("baseline_balance")
+    .select("bot_name, baseline_balance")
     .eq("account_label", accountLabel)
-    .eq("bot_name", botName)
-    .maybeSingle();
+    .in("bot_name", botNames);
 
-  if (data) {
-    return parseFloat(String(data.baseline_balance));
+  const existing = new Map<string, number>();
+  for (const row of data ?? []) {
+    existing.set(row.bot_name, parseFloat(String(row.baseline_balance)));
   }
 
-  // No baseline yet — store current balance as baseline
-  if (currentBalance > 0) {
-    await supabase.from("bot_baselines").insert({
-      account_label: accountLabel,
-      bot_name: botName,
-      baseline_balance: currentBalance,
-    });
+  // Insert missing baselines in one batch
+  const missing = subs.filter((s) => !existing.has(s.name) && s.total > 0);
+  if (missing.length > 0) {
+    await supabase.from("bot_baselines").insert(
+      missing.map((s) => ({
+        account_label: accountLabel,
+        bot_name: s.name,
+        baseline_balance: s.total,
+      }))
+    );
+    for (const s of missing) existing.set(s.name, s.total);
   }
 
-  return currentBalance;
+  return existing;
 }
 
 export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
@@ -75,27 +83,25 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
 
       type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
 
-      const subDetailsList: SubDetail[] = data.subDetails ?? [];
-      const bots: BotData[] = await Promise.all(
-        subDetailsList.map(async (sub) => {
-          const baseline = await getOrCreateBaseline(account.label, sub.name, sub.total);
-          const profit = sub.total - baseline;
-          const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
-
-          return {
-            id: sub.id || sub.name,
-            symbol: sub.name,
-            type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-            status: "active" as const,
-            invested: baseline,
-            currentValue: sub.total,
-            profit,
-            profitPct,
-            runningDays: 0,
-            label: account.label,
-          };
-        })
-      );
+    const subDetailsList: SubDetail[] = data.subDetails ?? [];
+    const baselines = await getBatchBaselines(account.label, subDetailsList);
+    const bots: BotData[] = subDetailsList.map((sub) => {
+      const baseline = baselines.get(sub.name) ?? sub.total;
+      const profit = sub.total - baseline;
+      const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+      return {
+        id: sub.id || sub.name,
+        symbol: sub.name,
+        type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+        status: "active" as const,
+        invested: baseline,
+        currentValue: sub.total,
+        profit,
+        profitPct,
+        runningDays: 0,
+        label: account.label,
+      };
+    });
 
       const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
       const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
