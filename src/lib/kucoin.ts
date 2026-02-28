@@ -59,74 +59,77 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  // Only retry on network/cold-start errors, not on KuCoin API errors
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // Retry up to 3 times on network-level errors only
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let invokeResult: { data: unknown; error: { message?: string } | null } | null = null;
     try {
-      const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
+      invokeResult = await supabase.functions.invoke("kucoin-proxy", {
         body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
       });
-
-      if (error) {
-        const isNetworkError = error.message?.includes("Failed to send") || error.message?.includes("fetch");
-        if (attempt === 1 && isNetworkError) {
-          await new Promise(r => setTimeout(r, 500));
-          continue;
-        }
-        throw new Error(error.message);
-      }
-      if (data?.error) throw new Error(data.error);
-
-      const grandTotal = parseFloat(String(data.grandTotal ?? 0));
-      const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
-      const subTotal = parseFloat(String(data.subTotal ?? 0));
-
-      type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
-
-      const subDetailsList: SubDetail[] = data.subDetails ?? [];
-      const baselines = await getBatchBaselines(account.label, subDetailsList);
-      const bots: BotData[] = subDetailsList.map((sub) => {
-        const baseline = baselines.get(sub.name) ?? sub.total;
-        const profit = sub.total - baseline;
-        const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
-        return {
-          id: sub.id || sub.name,
-          symbol: sub.name,
-          type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-          status: "active" as const,
-          invested: baseline,
-          currentValue: sub.total,
-          profit,
-          profitPct,
-          runningDays: 0,
-          label: account.label,
-        };
-      });
-
-      const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
-      const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
-      const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-
-      return {
-        label: account.label,
-        totalBalance: grandTotal,
-        spotBalance: masterUSDT,
-        futuresBalance: subTotal,
-        botBalance: subTotal,
-        profit: totalProfit,
-        profitPct,
-        bots,
-        diagnosis: data.diagnosis,
-        hasSubPermission: data.hasSubPermission,
-        subCount: data.subCount ?? 0,
-        rawDebug: data,
-      };
-    } catch (err) {
-      return empty(undefined, err instanceof Error ? err.message : "Unknown error");
+    } catch {
+      if (attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
+      return empty(undefined, "Network error — check your connection");
     }
+
+    const { data, error } = invokeResult;
+
+    if (error) {
+      const isNetworkError = error.message?.includes("Failed to") || error.message?.includes("fetch");
+      if (isNetworkError && attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
+      return empty(undefined, error.message ?? "Unknown error");
+    }
+
+    const d = data as Record<string, unknown>;
+    if (d?.error) return empty(undefined, String(d.error));
+
+    const grandTotal = parseFloat(String(d.grandTotal ?? 0));
+    const masterUSDT = parseFloat(String(d.masterUSDT ?? 0));
+    const subTotal = parseFloat(String(d.subTotal ?? 0));
+
+    type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
+    const subDetailsList: SubDetail[] = (d.subDetails as SubDetail[]) ?? [];
+    const baselines = await getBatchBaselines(account.label, subDetailsList);
+    const bots: BotData[] = subDetailsList.map((sub) => {
+      const baseline = baselines.get(sub.name) ?? sub.total;
+      const profit = sub.total - baseline;
+      const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+      return {
+        id: sub.id || sub.name,
+        symbol: sub.name,
+        type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+        status: "active" as const,
+        invested: baseline,
+        currentValue: sub.total,
+        profit,
+        profitPct,
+        runningDays: 0,
+        label: account.label,
+      };
+    });
+
+    const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
+    const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
+    const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+
+    return {
+      label: account.label,
+      totalBalance: grandTotal,
+      spotBalance: masterUSDT,
+      futuresBalance: subTotal,
+      botBalance: subTotal,
+      profit: totalProfit,
+      profitPct,
+      bots,
+      diagnosis: d.diagnosis as AccountData["diagnosis"],
+      hasSubPermission: d.hasSubPermission as boolean,
+      subCount: (d.subCount as number) ?? 0,
+      rawDebug: d,
+    };
   }
 
   return empty(undefined, "Request failed");
 }
+
 
 export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
   if (totalBalance <= 0) return;
