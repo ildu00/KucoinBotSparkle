@@ -83,27 +83,25 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
 
       type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
 
-      const subDetailsList: SubDetail[] = data.subDetails ?? [];
-      const bots: BotData[] = await Promise.all(
-        subDetailsList.map(async (sub) => {
-          const baseline = await getOrCreateBaseline(account.label, sub.name, sub.total);
-          const profit = sub.total - baseline;
-          const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
-
-          return {
-            id: sub.id || sub.name,
-            symbol: sub.name,
-            type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-            status: "active" as const,
-            invested: baseline,
-            currentValue: sub.total,
-            profit,
-            profitPct,
-            runningDays: 0,
-            label: account.label,
-          };
-        })
-      );
+    const subDetailsList: SubDetail[] = data.subDetails ?? [];
+    const baselines = await getBatchBaselines(account.label, subDetailsList);
+    const bots: BotData[] = subDetailsList.map((sub) => {
+      const baseline = baselines.get(sub.name) ?? sub.total;
+      const profit = sub.total - baseline;
+      const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+      return {
+        id: sub.id || sub.name,
+        symbol: sub.name,
+        type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+        status: "active" as const,
+        invested: baseline,
+        currentValue: sub.total,
+        profit,
+        profitPct,
+        runningDays: 0,
+        label: account.label,
+      };
+    });
 
       const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
       const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
