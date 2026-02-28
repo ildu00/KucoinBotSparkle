@@ -129,8 +129,6 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
         subCount: data.subCount ?? 0,
         rawDebug: data,
       };
-    } catch (err) {
-      return empty(undefined, err instanceof Error ? err.message : "Unknown error");
     }
   }
 
