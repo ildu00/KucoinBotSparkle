@@ -76,6 +76,7 @@ export default function Dashboard() {
       setShowSettings(false);
     } finally {
       setLoading(false);
+      setLoadingStatus("");
     }
   }, [accounts]);
 
