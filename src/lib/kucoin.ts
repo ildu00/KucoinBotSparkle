@@ -59,23 +59,24 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  // Retry up to 3 times on network-level errors only
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    let invokeResult: { data: unknown; error: { message?: string } | null } | null = null;
-    try {
-      invokeResult = await supabase.functions.invoke("kucoin-proxy", {
-        body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
-      });
-    } catch {
-      if (attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
-      return empty(undefined, "Network error — check your connection");
-    }
+  // Single attempt with client-side 25s timeout
+  let invokeResult: { data: unknown; error: { message?: string } | null } | null = null;
+  try {
+    const invokePromise = supabase.functions.invoke("kucoin-proxy", {
+      body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
+    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Request timed out after 25s")), 25000)
+    );
+    invokeResult = await Promise.race([invokePromise, timeoutPromise]);
+  } catch (e: unknown) {
+    return empty(undefined, e instanceof Error ? e.message : "Network error");
+  }
 
+  {
     const { data, error } = invokeResult;
 
     if (error) {
-      const isNetworkError = error.message?.includes("Failed to") || error.message?.includes("fetch");
-      if (isNetworkError && attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
       return empty(undefined, error.message ?? "Unknown error");
     }
 
