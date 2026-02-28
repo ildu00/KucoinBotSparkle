@@ -99,15 +99,12 @@ Deno.serve(async (req) => {
       diagnosis,
       grandTotal,
       masterUSDT,
-      masterSpotUSDT,
+      masterSpotUSDT: masterUSDT,
       masterFuturesUSDT,
       subTotal,
       subDetails,
-      subCount: subList.length,
-      // raw debug
+      subCount: subDetails.length,
       _rawFuturesAllSubs: futuresAllSubs,
-      _rawSubAccountsV2: subAccountsV2,
-      _rawMasterAccounts: masterAccounts,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
