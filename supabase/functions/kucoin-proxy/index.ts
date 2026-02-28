@@ -57,15 +57,19 @@ serve(async (req) => {
     const s = (ep: string) => apiCall(ak, as_, ap, SPOT, ep);
     const f = (ep: string) => apiCall(ak, as_, ap, FUT,  ep);
 
-    // Fetch all data in parallel:
-    // - Spot sub-accounts list (V2) - spot balances per sub-account
-    // - Futures sub-accounts list (V2) - GET /api/v1/account-overview-all returns ALL sub futures balances at once
-    // - Master spot accounts
-    const [subAccountsV2, futuresAllSubs, masterAccounts] = await Promise.all([
+    // Fetch all data in parallel with hard 20s overall timeout
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => {
+      return Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms))
+      ]);
+    };
+
+    const [subAccountsV2, futuresAllSubs, masterAccounts] = await withTimeout(Promise.all([
       s("/api/v2/sub-accounts?pageSize=100"),
       f("/api/v1/account-overview-all?currency=USDT"),
       s("/api/v1/accounts"),
-    ]);
+    ]), 20000);
 
     // Build a map of subName -> futuresUSDT from the futures all-subs endpoint
     type FutAcct = { accountName: string; accountEquity: number };
