@@ -59,22 +59,31 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  // Only retry on network/cold-start errors, not on KuCoin API errors
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // Retry up to 3 times on network errors only
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let data: unknown;
+    let invokeError: { message?: string } | null = null;
+
     try {
-      const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
+      const result = await supabase.functions.invoke("kucoin-proxy", {
         body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
       });
+      data = result.data;
+      invokeError = result.error;
+    } catch {
+      // Network-level exception → retry
+      if (attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
+      return empty(undefined, "Network error");
+    }
 
-      if (error) {
-        const isNetworkError = error.message?.includes("Failed to send") || error.message?.includes("fetch");
-        if (attempt === 1 && isNetworkError) {
-          await new Promise(r => setTimeout(r, 500));
-          continue;
-        }
-        throw new Error(error.message);
-      }
-      if (data?.error) throw new Error(data.error);
+    if (invokeError) {
+      const isNetworkError = invokeError.message?.includes("Failed to") || invokeError.message?.includes("fetch");
+      if (isNetworkError && attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
+      return empty(undefined, invokeError.message ?? "Unknown error");
+    }
+
+    const d = data as Record<string, unknown>;
+    if (d?.error) return empty(undefined, String(d.error));
 
       const grandTotal = parseFloat(String(data.grandTotal ?? 0));
       const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
