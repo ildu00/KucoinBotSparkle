@@ -22,16 +22,23 @@ async function apiCall(ak: string, as_: string, ap: string, base: string, ep: st
   const ts = Date.now().toString();
   const sig = await hmacSha256Base64(as_, ts + method + ep);
   const pp  = await hmacSha256Base64(as_, ap);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000); // 12s timeout per request
   try {
     const res = await fetch(`${base}${ep}`, {
       method,
+      signal: controller.signal,
       headers: {
         "KC-API-KEY": ak, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
         "KC-API-PASSPHRASE": pp, "KC-API-KEY-VERSION": "3", "Content-Type": "application/json",
       },
     });
+    clearTimeout(timeout);
     return await res.json();
-  } catch (e) { return { fetchError: String(e) }; }
+  } catch (e) {
+    clearTimeout(timeout);
+    return { fetchError: String(e) };
+  }
 }
 
 const SPOT = "https://api.kucoin.com";
