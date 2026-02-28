@@ -60,19 +60,36 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
   });
 
   let data: unknown;
-  try {
-    // Send as plain text/plain so the browser treats it as a "simple request"
-    // and skips CORS preflight (OPTIONS). The edge function has verify_jwt=false.
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase }),
-    });
-    data = await res.json();
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Network error";
-    return empty(undefined, msg);
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
+  const body = JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase });
+
+  // Retry up to 2 times — first attempt may hit a 504 OPTIONS cold-start
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 10000); // 10s per attempt
+      const res = await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "text/plain" },
+        body,
+      });
+      clearTimeout(tid);
+      if (!res.ok) {
+        if (attempt < 2) continue; // retry on non-200
+        return empty(undefined, `HTTP ${res.status}`);
+      }
+      data = await res.json();
+      break;
+    } catch (e: unknown) {
+      clearTimeout && void 0;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 500)); // short pause before retry
+        continue;
+      }
+      const msg = e instanceof Error ? e.message : "Network error";
+      return empty(undefined, msg);
+    }
   }
 
   const d = data as Record<string, unknown>;
