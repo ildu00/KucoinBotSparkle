@@ -41,8 +41,8 @@ export default function Dashboard() {
       return;
     }
     setLoading(true);
-    setLoadingStatus("Подключение к KuCoin...");
-    const slowTimer = setTimeout(() => setLoadingStatus("Ожидание ответа KuCoin API (может занять до 30с при cold start)..."), 6000);
+    setLoadingStatus("Запрос к KuCoin API...");
+    const slowTimer = setTimeout(() => setLoadingStatus("Долго? Это нормально при первом запросе (cold start ~10с)..."), 8000);
     try {
       const results = await Promise.all(valid.map(fetchAccountData));
       clearTimeout(slowTimer);
