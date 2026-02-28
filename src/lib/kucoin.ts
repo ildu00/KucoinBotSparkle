@@ -68,64 +68,82 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
     return empty(undefined, e instanceof Error ? e.message : "Network error");
   }
 
-  {
-    const { data, error } = invokeResult;
+  const { data, error } = invokeResult;
 
-    if (error) {
-      return empty(undefined, error.message ?? "Unknown error");
-    }
-
-    const d = data as Record<string, unknown>;
-    if (d?.error) return empty(undefined, String(d.error));
-
-    const grandTotal = parseFloat(String(d.grandTotal ?? 0));
-    const masterUSDT = parseFloat(String(d.masterUSDT ?? 0));
-    const subTotal = parseFloat(String(d.subTotal ?? 0));
-
-    type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
-    const subDetailsList: SubDetail[] = (d.subDetails as SubDetail[]) ?? [];
-    const baselines = await getBatchBaselines(account.label, subDetailsList);
-    const bots: BotData[] = subDetailsList.map((sub) => {
-      const baseline = baselines.get(sub.name) ?? sub.total;
-      const profit = sub.total - baseline;
-      const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
-      return {
-        id: sub.id || sub.name,
-        symbol: sub.name,
-        type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-        status: "active" as const,
-        invested: baseline,
-        currentValue: sub.total,
-        profit,
-        profitPct,
-        runningDays: 0,
-        label: account.label,
-      };
-    });
-
-    const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
-    const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
-    const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-
-    return {
-      label: account.label,
-      totalBalance: grandTotal,
-      spotBalance: masterUSDT,
-      futuresBalance: subTotal,
-      botBalance: subTotal,
-      profit: totalProfit,
-      profitPct,
-      bots,
-      diagnosis: d.diagnosis as AccountData["diagnosis"],
-      hasSubPermission: d.hasSubPermission as boolean,
-      subCount: (d.subCount as number) ?? 0,
-      rawDebug: d,
-    };
+  if (error) {
+    return empty(undefined, error.message ?? "Unknown error");
   }
 
-  return empty(undefined, "Request failed");
+  const d = data as Record<string, unknown>;
+  if (d?.error) return empty(undefined, String(d.error));
+
+  const grandTotal = parseFloat(String(d.grandTotal ?? 0));
+  const masterUSDT = parseFloat(String(d.masterUSDT ?? 0));
+  const subTotal = parseFloat(String(d.subTotal ?? 0));
+
+  type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
+  const subDetailsList: SubDetail[] = (d.subDetails as SubDetail[]) ?? [];
+
+  // Wrap DB baseline lookup in a 5s timeout to prevent hanging
+  let baselines: Map<string, number>;
+  try {
+    const baselineTimeout = new Promise<Map<string, number>>((resolve) =>
+      setTimeout(() => resolve(new Map()), 5000)
+    );
+    baselines = await Promise.race([getBatchBaselines(account.label, subDetailsList), baselineTimeout]);
+  } catch {
+    baselines = new Map();
+  }
+
+  const bots: BotData[] = subDetailsList.map((sub) => {
+    const baseline = baselines.get(sub.name) ?? sub.total;
+    const profit = sub.total - baseline;
+    const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+    return {
+      id: sub.id || sub.name,
+      symbol: sub.name,
+      type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+      status: "active" as const,
+      invested: baseline,
+      currentValue: sub.total,
+      profit,
+      profitPct,
+      runningDays: 0,
+      label: account.label,
+    };
+  });
+
+  const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
+  const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
+  const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+
+  return {
+    label: account.label,
+    totalBalance: grandTotal,
+    spotBalance: masterUSDT,
+    futuresBalance: subTotal,
+    botBalance: subTotal,
+    profit: totalProfit,
+    profitPct,
+    bots,
+    diagnosis: d.diagnosis as AccountData["diagnosis"],
+    hasSubPermission: d.hasSubPermission as boolean,
+    subCount: (d.subCount as number) ?? 0,
+    rawDebug: d,
+  };
 }
 
+export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
+  const timeout = new Promise<AccountData>((resolve) =>
+    setTimeout(() => resolve({
+      label: account.label,
+      totalBalance: 0, spotBalance: 0, futuresBalance: 0,
+      botBalance: 0, profit: 0, profitPct: 0, bots: [],
+      error: "Request timed out after 20s",
+    }), 20000)
+  );
+  return Promise.race([_doFetchAccountData(account), timeout]);
+}
 
 export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
   if (totalBalance <= 0) return;
@@ -136,7 +154,6 @@ export async function recordBalanceSnapshot(accountLabel: string, totalBalance: 
 }
 
 export async function fetchBalanceHistory(accountLabel: string): Promise<Array<{ time: string; value: number }>> {
-  // Fetch up to 30 most recent daily snapshots
   const { data } = await supabase
     .from("balance_history")
     .select("total_balance, recorded_at")
