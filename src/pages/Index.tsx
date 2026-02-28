@@ -41,8 +41,12 @@ export default function Dashboard() {
       return;
     }
     setLoading(true);
+    setLoadingStatus("Connecting to KuCoin...");
+    const statusTimer = setTimeout(() => setLoadingStatus("Waiting for KuCoin API response (may take up to 30s)..."), 5000);
     try {
       const results = await Promise.all(valid.map(fetchAccountData));
+      clearTimeout(statusTimer);
+      setLoadingStatus("");
       setAccountsData(results);
       setLastUpdate(new Date());
 
