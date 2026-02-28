@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      balance_history: {
+        Row: {
+          account_label: string
+          id: string
+          recorded_at: string
+          total_balance: number
+        }
+        Insert: {
+          account_label: string
+          id?: string
+          recorded_at?: string
+          total_balance: number
+        }
+        Update: {
+          account_label?: string
+          id?: string
+          recorded_at?: string
+          total_balance?: number
+        }
+        Relationships: []
+      }
       bot_baselines: {
         Row: {
           account_label: string
