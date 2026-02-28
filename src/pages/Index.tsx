@@ -41,8 +41,8 @@ export default function Dashboard() {
       return;
     }
     setLoading(true);
-    setLoadingStatus("Запрос к KuCoin API...");
-    const slowTimer = setTimeout(() => setLoadingStatus("Долго? Это нормально при первом запросе (cold start ~10с)..."), 8000);
+    setLoadingStatus("Fetching KuCoin API...");
+    const slowTimer = setTimeout(() => setLoadingStatus("Taking longer than usual? This is normal on first load (cold start ~10s)..."), 8000);
     try {
       const results = await Promise.all(valid.map(fetchAccountData));
       clearTimeout(slowTimer);
@@ -70,7 +70,7 @@ export default function Dashboard() {
       if (errors.length > 0) {
         errors.forEach((e) => toast.error(`${e.label}: ${e.error}`));
       } else {
-        toast.success("Данные обновлены");
+        toast.success("Data updated");
       }
       setShowSettings(false);
     } finally {
