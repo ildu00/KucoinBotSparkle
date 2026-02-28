@@ -80,6 +80,15 @@ export default function Dashboard() {
     }
   }, [accounts]);
 
+  // Keep the edge function warm (ping every 90s) to avoid cold-start OPTIONS 504
+  useEffect(() => {
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
+    const ping = () => fetch(url, { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" }).catch(() => {});
+    ping(); // immediate warm-up on mount
+    const id = setInterval(ping, 90_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Load history on mount
   useEffect(() => {
     const valid = accounts.filter((a) => a.apiKey && a.apiSecret && a.apiPassphrase);
