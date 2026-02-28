@@ -59,81 +59,77 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  // Retry up to 3 times on network errors only
+  // Retry up to 3 times on network-level errors only
   for (let attempt = 1; attempt <= 3; attempt++) {
-    let data: unknown;
-    let invokeError: { message?: string } | null = null;
-
+    let invokeResult: { data: unknown; error: { message?: string } | null } | null = null;
     try {
-      const result = await supabase.functions.invoke("kucoin-proxy", {
+      invokeResult = await supabase.functions.invoke("kucoin-proxy", {
         body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
       });
-      data = result.data;
-      invokeError = result.error;
     } catch {
-      // Network-level exception → retry
       if (attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
-      return empty(undefined, "Network error");
+      return empty(undefined, "Network error — check your connection");
     }
 
-    if (invokeError) {
-      const isNetworkError = invokeError.message?.includes("Failed to") || invokeError.message?.includes("fetch");
+    const { data, error } = invokeResult;
+
+    if (error) {
+      const isNetworkError = error.message?.includes("Failed to") || error.message?.includes("fetch");
       if (isNetworkError && attempt < 3) { await new Promise(r => setTimeout(r, 500)); continue; }
-      return empty(undefined, invokeError.message ?? "Unknown error");
+      return empty(undefined, error.message ?? "Unknown error");
     }
 
     const d = data as Record<string, unknown>;
     if (d?.error) return empty(undefined, String(d.error));
 
-      const grandTotal = parseFloat(String(data.grandTotal ?? 0));
-      const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
-      const subTotal = parseFloat(String(data.subTotal ?? 0));
+    const grandTotal = parseFloat(String(d.grandTotal ?? 0));
+    const masterUSDT = parseFloat(String(d.masterUSDT ?? 0));
+    const subTotal = parseFloat(String(d.subTotal ?? 0));
 
-      type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
-
-      const subDetailsList: SubDetail[] = data.subDetails ?? [];
-      const baselines = await getBatchBaselines(account.label, subDetailsList);
-      const bots: BotData[] = subDetailsList.map((sub) => {
-        const baseline = baselines.get(sub.name) ?? sub.total;
-        const profit = sub.total - baseline;
-        const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
-        return {
-          id: sub.id || sub.name,
-          symbol: sub.name,
-          type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-          status: "active" as const,
-          invested: baseline,
-          currentValue: sub.total,
-          profit,
-          profitPct,
-          runningDays: 0,
-          label: account.label,
-        };
-      });
-
-      const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
-      const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
-      const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-
+    type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
+    const subDetailsList: SubDetail[] = (d.subDetails as SubDetail[]) ?? [];
+    const baselines = await getBatchBaselines(account.label, subDetailsList);
+    const bots: BotData[] = subDetailsList.map((sub) => {
+      const baseline = baselines.get(sub.name) ?? sub.total;
+      const profit = sub.total - baseline;
+      const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
       return {
-        label: account.label,
-        totalBalance: grandTotal,
-        spotBalance: masterUSDT,
-        futuresBalance: subTotal,
-        botBalance: subTotal,
-        profit: totalProfit,
+        id: sub.id || sub.name,
+        symbol: sub.name,
+        type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+        status: "active" as const,
+        invested: baseline,
+        currentValue: sub.total,
+        profit,
         profitPct,
-        bots,
-        diagnosis: data.diagnosis,
-        hasSubPermission: data.hasSubPermission,
-        subCount: data.subCount ?? 0,
-        rawDebug: data,
+        runningDays: 0,
+        label: account.label,
       };
-    }
+    });
+
+    const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
+    const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
+    const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+
+    return {
+      label: account.label,
+      totalBalance: grandTotal,
+      spotBalance: masterUSDT,
+      futuresBalance: subTotal,
+      botBalance: subTotal,
+      profit: totalProfit,
+      profitPct,
+      bots,
+      diagnosis: d.diagnosis as AccountData["diagnosis"],
+      hasSubPermission: d.hasSubPermission as boolean,
+      subCount: (d.subCount as number) ?? 0,
+      rawDebug: d,
+    };
   }
 
   return empty(undefined, "Request failed");
 }
+
 
 export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
   if (totalBalance <= 0) return;
