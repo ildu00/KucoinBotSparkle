@@ -145,15 +145,12 @@ export default function Dashboard() {
               <span className="hidden sm:inline">{loading ? "Loading..." : "Refresh"}</span>
             </Button>
           </div>
-          {loading && loadingStatus && (
-            <div className="max-w-7xl mx-auto px-6 pb-2">
-              <p className="text-xs text-muted-foreground animate-pulse">{loadingStatus}</p>
-            </div>
-          )}
-          <div className="hidden">{/* close dummy */}
-            </Button>
-          </div>
         </div>
+        {loading && loadingStatus && (
+          <div className="border-t border-border/50 bg-background/60 px-6 py-1.5">
+            <p className="text-xs text-muted-foreground animate-pulse max-w-7xl mx-auto">{loadingStatus}</p>
+          </div>
+        )}
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
