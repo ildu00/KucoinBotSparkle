@@ -20,25 +20,13 @@ function loadAccounts(): ApiAccount[] {
   return [{ id: crypto.randomUUID(), label: "Account 1", apiKey: "", apiSecret: "", apiPassphrase: "" }];
 }
 
-function generateSimulatedHistory(total: number) {
-  const points = [];
-  const now = Date.now();
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(now - i * 24 * 60 * 60 * 1000);
-    const label = `${d.getMonth() + 1}/${d.getDate()}`;
-    const variance = (Math.random() - 0.45) * (total * 0.02);
-    points.push({ time: label, value: Math.max(0, total - i * (total * 0.001) + variance) });
-  }
-  points[points.length - 1].value = total;
-  return points;
-}
-
 export default function Dashboard() {
   const [accounts, setAccounts] = useState<ApiAccount[]>(loadAccounts);
   const [accountsData, setAccountsData] = useState<AccountData[]>([]);
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [historyData, setHistoryData] = useState<Array<{ time: string; value: number }>>([]);
 
   const saveAccounts = (accs: ApiAccount[]) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(accs));
