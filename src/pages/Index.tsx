@@ -44,6 +44,26 @@ export default function Dashboard() {
       const results = await Promise.all(valid.map(fetchAccountData));
       setAccountsData(results);
       setLastUpdate(new Date());
+
+      // Record balance snapshots and load history for the first account
+      const successResults = results.filter((r) => !r.error && r.totalBalance > 0);
+      await Promise.all(successResults.map((r) => recordBalanceSnapshot(r.label, r.totalBalance)));
+
+      if (successResults.length > 0) {
+        // Combine history across all accounts (sum per day)
+        const allHistories = await Promise.all(
+          successResults.map((r) => fetchBalanceHistory(r.label))
+        );
+        // Sum all account balances per day label
+        const combined = new Map<string, number>();
+        for (const hist of allHistories) {
+          for (const point of hist) {
+            combined.set(point.time, (combined.get(point.time) ?? 0) + point.value);
+          }
+        }
+        setHistoryData(Array.from(combined.entries()).map(([time, value]) => ({ time, value })));
+      }
+
       const errors = results.filter((r) => r.error);
       if (errors.length > 0) {
         errors.forEach((e) => toast.error(`${e.label}: ${e.error}`));
@@ -55,6 +75,23 @@ export default function Dashboard() {
       setLoading(false);
     }
   }, [accounts]);
+
+  // Load history on mount if we already have accounts configured
+  useEffect(() => {
+    const valid = accounts.filter((a) => a.apiKey && a.apiSecret && a.apiPassphrase);
+    if (valid.length === 0) return;
+    Promise.all(valid.map((a) => fetchBalanceHistory(a.label))).then((allHistories) => {
+      const combined = new Map<string, number>();
+      for (const hist of allHistories) {
+        for (const point of hist) {
+          combined.set(point.time, (combined.get(point.time) ?? 0) + point.value);
+        }
+      }
+      if (combined.size > 0) {
+        setHistoryData(Array.from(combined.entries()).map(([time, value]) => ({ time, value })));
+      }
+    });
+  }, []);
 
   const totalBalance = accountsData.reduce((s, a) => s + a.totalBalance, 0);
   const totalBotBalance = accountsData.reduce((s, a) => s + a.botBalance, 0);
@@ -71,7 +108,6 @@ export default function Dashboard() {
         { name: "Spot / Main", value: totalSpotBalance },
       ].filter((d) => d.value > 0);
 
-  const historyData = totalBalance > 0 ? generateSimulatedHistory(totalBalance) : [];
   const totalProfitPct = totalBalance > 0 ? (totalProfit / (totalBalance - totalProfit)) * 100 : 0;
 
   const missingSubPermission = accountsData.filter((a) => a.diagnosis === "MISSING_SUB_PERMISSION");
@@ -205,7 +241,9 @@ export default function Dashboard() {
                   <div className="w-1 h-4 rounded-full bg-primary" />
                   <h3 className="font-semibold text-sm">Balance History (30d)</h3>
                 </div>
-                <PerformanceChart data={historyData} />
+                {historyData.length > 0
+                  ? <PerformanceChart data={historyData} />
+                  : <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">No history yet — refresh to start recording</div>}
               </div>
               <div className="card-trading p-6 space-y-4">
                 <div className="flex items-center gap-2">
