@@ -61,12 +61,15 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
 
   let data: unknown;
   try {
-    // Use supabase.functions.invoke to avoid CORS preflight (OPTIONS) cold-start 504 timeouts
-    const { data: fnData, error: fnError } = await supabase.functions.invoke("kucoin-proxy", {
-      body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
+    // Send as plain text/plain so the browser treats it as a "simple request"
+    // and skips CORS preflight (OPTIONS). The edge function has verify_jwt=false.
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase }),
     });
-    if (fnError) return empty(undefined, fnError.message);
-    data = fnData;
+    data = await res.json();
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Network error";
     return empty(undefined, msg);
