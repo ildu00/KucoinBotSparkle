@@ -59,18 +59,17 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  const maxRetries = 3;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  // Only retry on network/cold-start errors, not on KuCoin API errors
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
         body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
       });
 
       if (error) {
-        // "Failed to send a request" = cold start / network blip, retry
-        if (attempt < maxRetries && error.message?.includes("Failed to send")) {
-          await new Promise(r => setTimeout(r, 1000 * attempt));
+        const isNetworkError = error.message?.includes("Failed to send") || error.message?.includes("fetch");
+        if (attempt === 1 && isNetworkError) {
+          await new Promise(r => setTimeout(r, 500));
           continue;
         }
         throw new Error(error.message);
@@ -83,25 +82,25 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
 
       type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
 
-    const subDetailsList: SubDetail[] = data.subDetails ?? [];
-    const baselines = await getBatchBaselines(account.label, subDetailsList);
-    const bots: BotData[] = subDetailsList.map((sub) => {
-      const baseline = baselines.get(sub.name) ?? sub.total;
-      const profit = sub.total - baseline;
-      const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
-      return {
-        id: sub.id || sub.name,
-        symbol: sub.name,
-        type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-        status: "active" as const,
-        invested: baseline,
-        currentValue: sub.total,
-        profit,
-        profitPct,
-        runningDays: 0,
-        label: account.label,
-      };
-    });
+      const subDetailsList: SubDetail[] = data.subDetails ?? [];
+      const baselines = await getBatchBaselines(account.label, subDetailsList);
+      const bots: BotData[] = subDetailsList.map((sub) => {
+        const baseline = baselines.get(sub.name) ?? sub.total;
+        const profit = sub.total - baseline;
+        const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+        return {
+          id: sub.id || sub.name,
+          symbol: sub.name,
+          type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+          status: "active" as const,
+          invested: baseline,
+          currentValue: sub.total,
+          profit,
+          profitPct,
+          runningDays: 0,
+          label: account.label,
+        };
+      });
 
       const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
       const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
@@ -122,14 +121,11 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
         rawDebug: data,
       };
     } catch (err) {
-      if (attempt === maxRetries) {
-        return empty(undefined, err instanceof Error ? err.message : "Unknown error");
-      }
-      await new Promise(r => setTimeout(r, 1000 * attempt));
+      return empty(undefined, err instanceof Error ? err.message : "Unknown error");
     }
   }
 
-  return empty(undefined, "Max retries exceeded");
+  return empty(undefined, "Request failed");
 }
 
 export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
