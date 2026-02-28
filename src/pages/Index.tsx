@@ -24,10 +24,10 @@ export default function Dashboard() {
   const [accounts, setAccounts] = useState<ApiAccount[]>(loadAccounts);
   const [accountsData, setAccountsData] = useState<AccountData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState("");
   const [showSettings, setShowSettings] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [historyData, setHistoryData] = useState<Array<{ time: string; value: number }>>([]);
-  const [loadingStatus, setLoadingStatus] = useState("");
 
   const saveAccounts = (accs: ApiAccount[]) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(accs));
@@ -41,16 +41,15 @@ export default function Dashboard() {
       return;
     }
     setLoading(true);
-    setLoadingStatus("Connecting to KuCoin...");
-    const statusTimer = setTimeout(() => setLoadingStatus("Waiting for KuCoin API response (may take up to 30s)..."), 5000);
+    setLoadingStatus("Подключение к KuCoin...");
+    const slowTimer = setTimeout(() => setLoadingStatus("Ожидание ответа KuCoin API (может занять до 30с при cold start)..."), 6000);
     try {
       const results = await Promise.all(valid.map(fetchAccountData));
-      clearTimeout(statusTimer);
-      setLoadingStatus("");
+      clearTimeout(slowTimer);
       setAccountsData(results);
       setLastUpdate(new Date());
 
-      // Record balance snapshots (fire-and-forget, don't block UI)
+      // Record snapshots & refresh history in background
       const successResults = results.filter((r) => !r.error && r.totalBalance > 0);
       Promise.all(successResults.map((r) => recordBalanceSnapshot(r.label, r.totalBalance)))
         .then(() => Promise.all(successResults.map((r) => fetchBalanceHistory(r.label))))
@@ -65,22 +64,23 @@ export default function Dashboard() {
             setHistoryData(Array.from(combined.entries()).map(([time, value]) => ({ time, value })));
           }
         })
-        .catch(() => {}); // ignore history errors silently
+        .catch(() => {});
 
       const errors = results.filter((r) => r.error);
       if (errors.length > 0) {
         errors.forEach((e) => toast.error(`${e.label}: ${e.error}`));
       } else {
-        toast.success("Data refreshed");
+        toast.success("Данные обновлены");
       }
       setShowSettings(false);
     } finally {
+      clearTimeout(slowTimer);
       setLoading(false);
       setLoadingStatus("");
     }
   }, [accounts]);
 
-  // Load history on mount if we already have accounts configured
+  // Load history on mount
   useEffect(() => {
     const valid = accounts.filter((a) => a.apiKey && a.apiSecret && a.apiPassphrase);
     if (valid.length === 0) return;
@@ -98,7 +98,6 @@ export default function Dashboard() {
   }, []);
 
   const totalBalance = accountsData.reduce((s, a) => s + a.totalBalance, 0);
-  const totalBotBalance = accountsData.reduce((s, a) => s + a.botBalance, 0);
   const totalFuturesBalance = accountsData.reduce((s, a) => s + (a.futuresBalance ?? 0), 0);
   const totalSpotBalance = accountsData.reduce((s, a) => s + a.spotBalance, 0);
   const totalProfit = accountsData.reduce((s, a) => s + a.profit, 0);
@@ -113,7 +112,6 @@ export default function Dashboard() {
       ].filter((d) => d.value > 0);
 
   const totalProfitPct = totalBalance > 0 ? (totalProfit / (totalBalance - totalProfit)) * 100 : 0;
-
   const missingSubPermission = accountsData.filter((a) => a.diagnosis === "MISSING_SUB_PERMISSION");
 
   return (
@@ -147,7 +145,7 @@ export default function Dashboard() {
           </div>
         </div>
         {loading && loadingStatus && (
-          <div className="border-t border-border/50 bg-background/60 px-6 py-1.5">
+          <div className="border-t border-border/30 bg-background/60 px-6 py-1.5">
             <p className="text-xs text-muted-foreground animate-pulse max-w-7xl mx-auto">{loadingStatus}</p>
           </div>
         )}
@@ -167,7 +165,7 @@ export default function Dashboard() {
             <ApiKeysForm accounts={accounts} onChange={saveAccounts} />
             <Button onClick={fetchAll} disabled={loading} className="w-full gap-2 bg-primary text-primary-foreground glow-primary">
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              {loading ? "Fetching data..." : "Load Dashboard"}
+              {loading ? (loadingStatus || "Fetching data...") : "Load Dashboard"}
             </Button>
           </div>
         )}
@@ -189,7 +187,6 @@ export default function Dashboard() {
         {/* Dashboard */}
         {accountsData.length > 0 && (
           <div className="space-y-6 animate-fade-in">
-
             {/* Error banners */}
             {accountsData.filter((a) => a.error).map((a) => (
               <div key={a.label} className="flex items-center gap-3 p-4 rounded-lg bg-loss/10 border border-loss/30 text-sm">
@@ -206,23 +203,8 @@ export default function Dashboard() {
                   Action Required — API key missing "Sub-Account Management" permission
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Found <strong className="text-foreground">{a.subCount} bot sub-accounts</strong> (robot…) but cannot read their balances. Add <strong className="text-foreground">Sub-Account Management</strong> to your API key permissions.
+                  Found <strong className="text-foreground">{a.subCount} bot sub-accounts</strong> (robot…) but cannot read their balances.
                 </p>
-                <div className="bg-secondary rounded-lg p-4 text-sm">
-                  <p className="font-semibold text-xs uppercase tracking-widest text-muted-foreground mb-2">How to fix:</p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground leading-relaxed">
-                    <li>Go to <strong className="text-foreground">KuCoin → Account → API Management</strong></li>
-                    <li>
-                      Create a new key, enable all 4 permissions:
-                      <div className="mt-1.5 ml-5 flex flex-wrap gap-1.5">
-                        {["General", "Spot Trading", "Futures Trading", "Sub-Account Management"].map(p => (
-                          <span key={p} className="px-2 py-0.5 rounded text-xs font-mono bg-primary/20 text-primary border border-primary/30">{p}</span>
-                        ))}
-                      </div>
-                    </li>
-                    <li>Enter the new key above → click <strong className="text-foreground">Refresh</strong></li>
-                  </ol>
-                </div>
               </div>
             ))}
 
@@ -299,7 +281,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Per-account summary cards (multi-account) */}
+            {/* Per-account summary (multi-account) */}
             {accountsData.length > 1 && (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {accountsData.map((acc) => (
