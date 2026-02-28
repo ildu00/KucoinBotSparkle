@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { DebugPanel } from "@/components/DebugPanel";
 import { RefreshCw, Settings, Bot, DollarSign, TrendingUp, Wallet, AlertCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { ApiKeysForm, type ApiAccount } from "@/components/ApiKeysForm";
 import { StatCard } from "@/components/StatCard";
 import { BotsTable, type BotData } from "@/components/BotsTable";
 import { AllocationChart, PerformanceChart } from "@/components/Charts";
-import { fetchAccountData, type AccountData } from "@/lib/kucoin";
+import { fetchAccountData, recordBalanceSnapshot, fetchBalanceHistory, type AccountData } from "@/lib/kucoin";
 import { toast } from "sonner";
 
 const STORAGE_KEY = "kucoin_accounts";
