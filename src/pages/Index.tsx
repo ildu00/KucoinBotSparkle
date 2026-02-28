@@ -45,24 +45,22 @@ export default function Dashboard() {
       setAccountsData(results);
       setLastUpdate(new Date());
 
-      // Record balance snapshots and load history for the first account
+      // Record balance snapshots (fire-and-forget, don't block UI)
       const successResults = results.filter((r) => !r.error && r.totalBalance > 0);
-      await Promise.all(successResults.map((r) => recordBalanceSnapshot(r.label, r.totalBalance)));
-
-      if (successResults.length > 0) {
-        // Combine history across all accounts (sum per day)
-        const allHistories = await Promise.all(
-          successResults.map((r) => fetchBalanceHistory(r.label))
-        );
-        // Sum all account balances per day label
-        const combined = new Map<string, number>();
-        for (const hist of allHistories) {
-          for (const point of hist) {
-            combined.set(point.time, (combined.get(point.time) ?? 0) + point.value);
+      Promise.all(successResults.map((r) => recordBalanceSnapshot(r.label, r.totalBalance)))
+        .then(() => Promise.all(successResults.map((r) => fetchBalanceHistory(r.label))))
+        .then((allHistories) => {
+          const combined = new Map<string, number>();
+          for (const hist of allHistories) {
+            for (const point of hist) {
+              combined.set(point.time, (combined.get(point.time) ?? 0) + point.value);
+            }
           }
-        }
-        setHistoryData(Array.from(combined.entries()).map(([time, value]) => ({ time, value })));
-      }
+          if (combined.size > 0) {
+            setHistoryData(Array.from(combined.entries()).map(([time, value]) => ({ time, value })));
+          }
+        })
+        .catch(() => {}); // ignore history errors silently
 
       const errors = results.filter((r) => r.error);
       if (errors.length > 0) {
