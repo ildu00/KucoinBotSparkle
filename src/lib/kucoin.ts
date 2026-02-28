@@ -61,17 +61,12 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
 
   let data: unknown;
   try {
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
-      body: JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase }),
+    // Use supabase.functions.invoke to avoid CORS preflight (OPTIONS) cold-start 504 timeouts
+    const { data: fnData, error: fnError } = await supabase.functions.invoke("kucoin-proxy", {
+      body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
     });
-    data = await res.json();
+    if (fnError) return empty(undefined, fnError.message);
+    data = fnData;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Network error";
     return empty(undefined, msg);
