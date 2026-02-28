@@ -126,6 +126,38 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
   return empty(undefined, "Max retries exceeded");
 }
 
+export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
+  if (totalBalance <= 0) return;
+  await supabase.from("balance_history").insert({
+    account_label: accountLabel,
+    total_balance: totalBalance,
+  });
+}
+
+export async function fetchBalanceHistory(accountLabel: string): Promise<Array<{ time: string; value: number }>> {
+  // Fetch up to 30 most recent daily snapshots
+  const { data } = await supabase
+    .from("balance_history")
+    .select("total_balance, recorded_at")
+    .eq("account_label", accountLabel)
+    .order("recorded_at", { ascending: true })
+    .limit(200);
+
+  if (!data || data.length === 0) return [];
+
+  // Group by date (keep last snapshot per day)
+  const byDay = new Map<string, number>();
+  for (const row of data) {
+    const d = new Date(row.recorded_at);
+    const key = `${d.getMonth() + 1}/${d.getDate()}`;
+    byDay.set(key, parseFloat(String(row.total_balance)));
+  }
+
+  return Array.from(byDay.entries())
+    .slice(-30)
+    .map(([time, value]) => ({ time, value }));
+}
+
 export async function resetBaseline(accountLabel: string, botName: string): Promise<void> {
   await supabase.from("bot_baselines").delete()
     .eq("account_label", accountLabel)
