@@ -145,6 +145,14 @@ export default function Dashboard() {
               <span className="hidden sm:inline">{loading ? "Loading..." : "Refresh"}</span>
             </Button>
           </div>
+          {loading && loadingStatus && (
+            <div className="max-w-7xl mx-auto px-6 pb-2">
+              <p className="text-xs text-muted-foreground animate-pulse">{loadingStatus}</p>
+            </div>
+          )}
+          <div className="hidden">{/* close dummy */}
+            </Button>
+          </div>
         </div>
       </header>
 
