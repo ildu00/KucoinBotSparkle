@@ -51,63 +51,79 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  try {
-    const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
-      body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
-    });
-    if (error) throw new Error(error.message);
-    if (data?.error) throw new Error(data.error);
+  const maxRetries = 3;
 
-    const grandTotal = parseFloat(String(data.grandTotal ?? 0));
-    const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
-    const subTotal = parseFloat(String(data.subTotal ?? 0));
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { data, error } = await supabase.functions.invoke("kucoin-proxy", {
+        body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
+      });
 
-    type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
+      if (error) {
+        // "Failed to send a request" = cold start / network blip, retry
+        if (attempt < maxRetries && error.message?.includes("Failed to send")) {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+          continue;
+        }
+        throw new Error(error.message);
+      }
+      if (data?.error) throw new Error(data.error);
 
-    // Build bot list with profit from baselines
-    const subDetailsList: SubDetail[] = data.subDetails ?? [];
-    const bots: BotData[] = await Promise.all(
-      subDetailsList.map(async (sub) => {
-        const baseline = await getOrCreateBaseline(account.label, sub.name, sub.total);
-        const profit = sub.total - baseline;
-        const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
+      const grandTotal = parseFloat(String(data.grandTotal ?? 0));
+      const masterUSDT = parseFloat(String(data.masterUSDT ?? 0));
+      const subTotal = parseFloat(String(data.subTotal ?? 0));
 
-        return {
-          id: sub.id || sub.name,
-          symbol: sub.name,
-          type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
-          status: "active" as const,
-          invested: baseline,
-          currentValue: sub.total,
-          profit,
-          profitPct,
-          runningDays: 0,
-          label: account.label,
-        };
-      })
-    );
+      type SubDetail = { name: string; id: string; spotUSDT: number; futuresUSDT: number; total: number };
 
-    const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
-    const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
-    const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+      const subDetailsList: SubDetail[] = data.subDetails ?? [];
+      const bots: BotData[] = await Promise.all(
+        subDetailsList.map(async (sub) => {
+          const baseline = await getOrCreateBaseline(account.label, sub.name, sub.total);
+          const profit = sub.total - baseline;
+          const profitPct = baseline > 0 ? (profit / baseline) * 100 : 0;
 
-    return {
-      label: account.label,
-      totalBalance: grandTotal,
-      spotBalance: masterUSDT,
-      futuresBalance: subTotal,
-      botBalance: subTotal,
-      profit: totalProfit,
-      profitPct,
-      bots,
-      diagnosis: data.diagnosis,
-      hasSubPermission: data.hasSubPermission,
-      subCount: data.subCount ?? 0,
-      rawDebug: data,
-    };
-  } catch (err) {
-    return empty(undefined, err instanceof Error ? err.message : "Unknown error");
+          return {
+            id: sub.id || sub.name,
+            symbol: sub.name,
+            type: sub.futuresUSDT > 0 ? "FUTURES_GRID" : "SPOT_GRID",
+            status: "active" as const,
+            invested: baseline,
+            currentValue: sub.total,
+            profit,
+            profitPct,
+            runningDays: 0,
+            label: account.label,
+          };
+        })
+      );
+
+      const totalProfit = bots.reduce((s, b) => s + b.profit, 0);
+      const totalInvested = bots.reduce((s, b) => s + b.invested, 0);
+      const profitPct = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+
+      return {
+        label: account.label,
+        totalBalance: grandTotal,
+        spotBalance: masterUSDT,
+        futuresBalance: subTotal,
+        botBalance: subTotal,
+        profit: totalProfit,
+        profitPct,
+        bots,
+        diagnosis: data.diagnosis,
+        hasSubPermission: data.hasSubPermission,
+        subCount: data.subCount ?? 0,
+        rawDebug: data,
+      };
+    } catch (err) {
+      if (attempt === maxRetries) {
+        return empty(undefined, err instanceof Error ? err.message : "Unknown error");
+      }
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
   }
+
+  return empty(undefined, "Max retries exceeded");
 }
 
 export async function resetBaseline(accountLabel: string, botName: string): Promise<void> {
