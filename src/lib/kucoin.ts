@@ -59,16 +59,27 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
     diagnosis: diag, error,
   });
 
-  let invokeResult: { data: unknown; error: { message?: string } | null };
+  let data: unknown;
   try {
-    invokeResult = await supabase.functions.invoke("kucoin-proxy", {
-      body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 15000);
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
+    const res = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase }),
     });
+    clearTimeout(tid);
+    data = await res.json();
   } catch (e: unknown) {
-    return empty(undefined, e instanceof Error ? e.message : "Network error");
+    const msg = e instanceof Error ? (e.name === "AbortError" ? "KuCoin API timeout (15s)" : e.message) : "Network error";
+    return empty(undefined, msg);
   }
-
-  const { data, error } = invokeResult;
 
   if (error) {
     return empty(undefined, error.message ?? "Unknown error");
