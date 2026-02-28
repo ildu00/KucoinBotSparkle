@@ -61,12 +61,9 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
 
   let data: unknown;
   try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 35000);
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
     const res = await fetch(url, {
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -74,10 +71,9 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
       },
       body: JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase }),
     });
-    clearTimeout(tid);
     data = await res.json();
   } catch (e: unknown) {
-    const msg = e instanceof Error ? (e.name === "AbortError" ? "KuCoin API timeout (15s)" : e.message) : "Network error";
+    const msg = e instanceof Error ? e.message : "Network error";
     return empty(undefined, msg);
   }
 
@@ -141,15 +137,7 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
 }
 
 export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
-  const timeout = new Promise<AccountData>((resolve) =>
-    setTimeout(() => resolve({
-      label: account.label,
-      totalBalance: 0, spotBalance: 0, futuresBalance: 0,
-      botBalance: 0, profit: 0, profitPct: 0, bots: [],
-      error: "Request timed out after 40s",
-    }), 40000)
-  );
-  return Promise.race([_doFetchAccountData(account), timeout]);
+  return _doFetchAccountData(account);
 }
 
 export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
