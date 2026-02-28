@@ -70,7 +70,7 @@ export default function Dashboard() {
       if (errors.length > 0) {
         errors.forEach((e) => toast.error(`${e.label}: ${e.error}`));
       } else {
-        toast.success("Данные обновлены");
+        toast.success("Data updated");
       }
       setShowSettings(false);
     } finally {
