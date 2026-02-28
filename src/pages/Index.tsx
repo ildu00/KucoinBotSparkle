@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [historyData, setHistoryData] = useState<Array<{ time: string; value: number }>>([]);
+  const [loadingStatus, setLoadingStatus] = useState("");
 
   const saveAccounts = (accs: ApiAccount[]) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(accs));
