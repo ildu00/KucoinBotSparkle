@@ -48,7 +48,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { apiKey: ak, apiSecret: as_, apiPassphrase: ap } = await req.json();
+    const body = await req.text();
+    const { apiKey: ak, apiSecret: as_, apiPassphrase: ap } = JSON.parse(body);
     if (!ak || !as_ || !ap) return new Response(
       JSON.stringify({ error: "Missing credentials" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
