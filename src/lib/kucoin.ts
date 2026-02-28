@@ -147,7 +147,7 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
       totalBalance: 0, spotBalance: 0, futuresBalance: 0,
       botBalance: 0, profit: 0, profitPct: 0, bots: [],
       error: "Request timed out after 40s",
-    }), 20000)
+    }), 40000)
   );
   return Promise.race([_doFetchAccountData(account), timeout]);
 }
