@@ -137,15 +137,7 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
 }
 
 export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
-  const timeout = new Promise<AccountData>((resolve) =>
-    setTimeout(() => resolve({
-      label: account.label,
-      totalBalance: 0, spotBalance: 0, futuresBalance: 0,
-      botBalance: 0, profit: 0, profitPct: 0, bots: [],
-      error: "Request timed out after 40s",
-    }), 40000)
-  );
-  return Promise.race([_doFetchAccountData(account), timeout]);
+  return _doFetchAccountData(account);
 }
 
 export async function recordBalanceSnapshot(accountLabel: string, totalBalance: number): Promise<void> {
