@@ -65,13 +65,9 @@ Deno.serve(async (req) => {
       ]);
     };
 
-    const [subAccountsV2, futuresAllSubs, masterAccounts] = await withTimeout(Promise.all([
-      s("/api/v2/sub-accounts?pageSize=100"),
-      f("/api/v1/account-overview-all?currency=USDT"),
-      s("/api/v1/accounts"),
-    ]), 20000);
+    // Only one API call needed — futures overview-all has everything
+    const futuresAllSubs = await withTimeout(f("/api/v1/account-overview-all?currency=USDT"), 15000);
 
-    // Build a map of subName -> futuresUSDT from the futures all-subs endpoint
     type FutAcct = { accountName: string; accountEquity: number };
     const futAccountsList: FutAcct[] = futuresAllSubs?.data?.accounts ?? [];
     const futuresMap = new Map<string, number>();
@@ -79,47 +75,19 @@ Deno.serve(async (req) => {
       futuresMap.set(acct.accountName, parseFloat(String(acct.accountEquity ?? 0)));
     }
 
-    // Master futures equity (accountName === "main" in the overview-all response)
     const masterFuturesUSDT = futuresMap.get("main") ?? 0;
+    const masterUSDT = masterFuturesUSDT;
 
-    // Master spot balance
-    let masterSpotUSDT = 0;
-    for (const acc of masterAccounts?.data ?? []) {
-      if ((acc as { currency: string }).currency === "USDT") {
-        masterSpotUSDT += parseFloat((acc as { balance: string }).balance ?? "0");
-      }
-    }
-    const masterUSDT = masterSpotUSDT + masterFuturesUSDT;
-
-    type SubV2Item = {
-      subUserId: string | null;
-      subName: string;
-      mainAccounts: Array<{ currency: string; balance: string }>;
-      tradeAccounts: Array<{ currency: string; balance: string }>;
-      tradeHFAccounts: Array<{ currency: string; balance: string }>;
-    };
-
-    const subList: SubV2Item[] = subAccountsV2?.data?.items ?? subAccountsV2?.data ?? [];
-    const robotSubs = subList.filter((s) => s.subName?.startsWith("robot"));
-
-    // Build sub details combining spot (from V2 inline) + futures (from overview-all map)
-    const subDetails = robotSubs.map((sub) => {
-      let spotUSDT = 0;
-      for (const type of ["mainAccounts", "tradeAccounts", "tradeHFAccounts"] as const) {
-        for (const acc of sub[type] ?? []) {
-          if (acc.currency === "USDT") spotUSDT += parseFloat(acc.balance ?? "0");
-        }
-      }
-      const futuresUSDT = futuresMap.get(sub.subName) ?? 0;
-
-      return {
-        name: sub.subName,
-        id: sub.subUserId ?? sub.subName,
-        spotUSDT,
-        futuresUSDT,
-        total: spotUSDT + futuresUSDT,
-      };
-    });
+    // Build sub details from futures overview-all (robot accounts only)
+    const subDetails = futAccountsList
+      .filter((a) => a.accountName?.startsWith("robot"))
+      .map((acct) => ({
+        name: acct.accountName,
+        id: acct.accountName,
+        spotUSDT: 0,
+        futuresUSDT: acct.accountEquity,
+        total: acct.accountEquity,
+      }));
 
     const subTotal = subDetails.reduce((sum, r) => sum + r.total, 0);
     const grandTotal = masterUSDT + subTotal;
