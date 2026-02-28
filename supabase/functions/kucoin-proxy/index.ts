@@ -49,10 +49,12 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.text();
-    const { apiKey: ak, apiSecret: as_, apiPassphrase: ap } = JSON.parse(body);
+    const parsed = JSON.parse(body || "{}");
+    const { apiKey: ak, apiSecret: as_, apiPassphrase: ap } = parsed;
+    // Keep-warm ping — return early with 200
     if (!ak || !as_ || !ap) return new Response(
-      JSON.stringify({ error: "Missing credentials" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ pong: true }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
     const s = (ep: string) => apiCall(ak, as_, ap, SPOT, ep);
