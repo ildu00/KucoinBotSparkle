@@ -51,7 +51,7 @@ async function getBatchBaselines(
   return existing;
 }
 
-export async function fetchAccountData(account: ApiAccount): Promise<AccountData> {
+async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
   const empty = (diag?: AccountData["diagnosis"], error?: string): AccountData => ({
     label: account.label,
     totalBalance: 0, spotBalance: 0, futuresBalance: 0,
@@ -59,16 +59,11 @@ export async function fetchAccountData(account: ApiAccount): Promise<AccountData
     diagnosis: diag, error,
   });
 
-  // Single attempt with client-side 25s timeout
-  let invokeResult: { data: unknown; error: { message?: string } | null } | null = null;
+  let invokeResult: { data: unknown; error: { message?: string } | null };
   try {
-    const invokePromise = supabase.functions.invoke("kucoin-proxy", {
+    invokeResult = await supabase.functions.invoke("kucoin-proxy", {
       body: { apiKey: account.apiKey, apiSecret: account.apiSecret, apiPassphrase: account.apiPassphrase },
     });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Request timed out after 25s")), 25000)
-    );
-    invokeResult = await Promise.race([invokePromise, timeoutPromise]);
   } catch (e: unknown) {
     return empty(undefined, e instanceof Error ? e.message : "Network error");
   }
