@@ -62,7 +62,7 @@ async function _doFetchAccountData(account: ApiAccount): Promise<AccountData> {
   let data: unknown;
   try {
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 15000);
+    const tid = setTimeout(() => controller.abort(), 35000);
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kucoin-proxy`;
     const res = await fetch(url, {
       method: "POST",
